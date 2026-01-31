@@ -18,10 +18,6 @@ const faqs = [
     answer: 'x402 is an open protocol for internet payments that uses EIP-712 signed authorizations. We chose USDC on Base because it offers fast, low-cost transactions with finality in seconds. This enables true pay-per-scan pricing without subscriptions or upfront commitments.',
   },
   {
-    question: 'Is my wallet secure?',
-    answer: 'Absolutely. Your private keys are stored in your operating system\'s native keyring (macOS Keychain, Linux Secret Service/KWallet/pass, or Windows Credential). Keys never leave your device and are never transmitted to our servers. Only your wallet address is shared for account linking.',
-  },
-  {
     question: 'Can I self-host Stronghold?',
     answer: 'Yes! Stronghold is fully open source under the MIT license. You can run your own instance on your infrastructure, use your own API keys, and have complete control over your data. The self-hosted version supports manual x402 payments.',
   },
