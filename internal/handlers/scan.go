@@ -22,13 +22,17 @@ func NewScanHandler(scanner *stronghold.Scanner, x402 *middleware.X402Middleware
 	}
 }
 
-// ScanInputRequest represents a request to scan input
-type ScanInputRequest struct {
-	Text      string `json:"text"`
-	SessionID string `json:"session_id,omitempty"`
+// ScanContentRequest represents a request to scan external content for prompt injection
+type ScanContentRequest struct {
+	Text        string `json:"text"`
+	SourceURL   string `json:"source_url,omitempty"`   // Where content came from (e.g., https://github.com/...)
+	SourceType  string `json:"source_type,omitempty"`  // "web_page", "file", "api_response", "code_repo"
+	ContentType string `json:"content_type,omitempty"` // "html", "markdown", "json", "text", "code"
+	FilePath    string `json:"file_path,omitempty"`    // For file reads, e.g., "README.md"
+	SessionID   string `json:"session_id,omitempty"`   // For multi-turn context
 }
 
-// ScanOutputRequest represents a request to scan output
+// ScanOutputRequest represents a request to scan LLM/agent output for credential leaks
 type ScanOutputRequest struct {
 	Text string `json:"text"`
 }
@@ -49,10 +53,10 @@ type ScanMultiturnRequest struct {
 func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 	group := app.Group("/v1/scan")
 
-	// Input scanning - $0.001
-	group.Post("/input", h.x402.RequirePayment(0.001), h.ScanInput)
+	// Content scanning - for external content (websites, files, APIs) - $0.001
+	group.Post("/content", h.x402.RequirePayment(0.001), h.ScanContent)
 
-	// Output scanning - $0.001
+	// Output scanning - for LLM/agent output credential leak detection - $0.001
 	group.Post("/output", h.x402.RequirePayment(0.001), h.ScanOutput)
 
 	// Unified scanning - $0.002
@@ -60,21 +64,24 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 
 	// Multi-turn scanning - $0.005
 	group.Post("/multiturn", h.x402.RequirePayment(0.005), h.ScanMultiturn)
+
+	// Deprecated: /input endpoint - redirects to /content for backward compatibility
+	group.Post("/input", h.x402.RequirePayment(0.001), h.ScanContent)
 }
 
-// ScanInput handles input scanning
-// @Summary Scan user input for prompt injection
-// @Description Scans user input text for prompt injection attacks and other security threats
+// ScanContent handles external content scanning for prompt injection
+// @Summary Scan external content for prompt injection
+// @Description Scans content from external sources (websites, files, APIs) for prompt injection attacks before passing to LLM
 // @Tags scan
 // @Accept json
 // @Produce json
-// @Param request body ScanInputRequest true "Input scan request"
+// @Param request body ScanContentRequest true "Content scan request"
 // @Success 200 {object} stronghold.ScanResult
 // @Failure 400 {object} map[string]string
 // @Failure 402 {object} map[string]interface{}
-// @Router /v1/scan/input [post]
-func (h *ScanHandler) ScanInput(c fiber.Ctx) error {
-	var req ScanInputRequest
+// @Router /v1/scan/content [post]
+func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
+	var req ScanContentRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
@@ -87,12 +94,21 @@ func (h *ScanHandler) ScanInput(c fiber.Ctx) error {
 		})
 	}
 
-	result, err := h.scanner.ScanInput(c.Context(), req.Text)
+	result, err := h.scanner.ScanContent(c.Context(), req.Text, req.SourceURL, req.SourceType, req.ContentType)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Scan failed: " + err.Error(),
 		})
 	}
+
+	// Add source metadata to result
+	if result.Metadata == nil {
+		result.Metadata = make(map[string]interface{})
+	}
+	result.Metadata["source_url"] = req.SourceURL
+	result.Metadata["source_type"] = req.SourceType
+	result.Metadata["content_type"] = req.ContentType
+	result.Metadata["file_path"] = req.FilePath
 
 	result.RequestID = uuid.New().String()
 	h.x402.PaymentResponse(c, result.RequestID)
