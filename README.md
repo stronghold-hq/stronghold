@@ -1,6 +1,6 @@
-# Citadel API Service
+# Stronghold API Service
 
-A pay-per-request API service that wraps the Citadel AI security scanner with x402 crypto payment integration. Enables AI agents to proxy requests through crypto payments to detect prompt injection attacks and credential leaks.
+A pay-per-request API service that wraps the Stronghold AI security scanner with x402 crypto payment integration. Enables AI agents to proxy requests through crypto payments to detect prompt injection attacks and credential leaks.
 
 ## Features
 
@@ -27,15 +27,15 @@ newgrp docker
 
 3. **Clone and configure**
 ```bash
-git clone <repo-url>
-cd citadel-api
+git clone https://github.com/yv-was-taken/stronghold.git
+cd stronghold
 
 # Create environment file
 cat > .env << 'EOF'
 X402_WALLET_ADDRESS=0xYOUR_WALLET_ADDRESS
 X402_NETWORK=base
-CITADEL_ENABLE_HUGOT=true
-CITADEL_ENABLE_SEMANTICS=true
+STRONGHOLD_ENABLE_HUGOT=true
+STRONGHOLD_ENABLE_SEMANTICS=true
 EOF
 ```
 
@@ -49,7 +49,7 @@ docker-compose --profile with-proxy up -d
 ```
 
 5. **Configure Caddy** (for HTTPS)
-   - Edit `Caddyfile` and replace `api.citadel.security` with your domain
+   - Edit `Caddyfile` and replace `api.stronghold.security` with your domain
    - Ensure DNS points to your VPS
    - Caddy auto-provisions Let's Encrypt certificates
 
@@ -59,8 +59,8 @@ docker-compose --profile with-proxy up -d
 |----------|----------|---------|-------------|
 | `X402_WALLET_ADDRESS` | Yes | - | USDC receiving address |
 | `X402_NETWORK` | No | `base` | `base` or `base-sepolia` |
-| `CITADEL_ENABLE_HUGOT` | No | `true` | Enable ML classification |
-| `CITADEL_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity |
+| `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification |
+| `STRONGHOLD_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity |
 
 ## Configuration
 
@@ -75,16 +75,16 @@ X402_WALLET_ADDRESS=0x...           # Receiving wallet address
 X402_FACILITATOR_URL=https://x402.org/facilitator
 X402_NETWORK=base-sepolia           # or base for production
 
-# Citadel Configuration
-CITADEL_BLOCK_THRESHOLD=0.55
-CITADEL_WARN_THRESHOLD=0.35
-CITADEL_ENABLE_HUGOT=true
-CITADEL_ENABLE_SEMANTICS=true
+# Stronghold Configuration
+STRONGHOLD_BLOCK_THRESHOLD=0.55
+STRONGHOLD_WARN_THRESHOLD=0.35
+STRONGHOLD_ENABLE_HUGOT=true
+STRONGHOLD_ENABLE_SEMANTICS=true
 HUGOT_MODEL_PATH=./models
 
 # Optional LLM Layer
-CITADEL_LLM_PROVIDER=groq
-CITADEL_LLM_API_KEY=gsk_...
+STRONGHOLD_LLM_PROVIDER=groq
+STRONGHOLD_LLM_API_KEY=gsk_...
 
 # Pricing (in USD)
 PRICE_SCAN_INPUT=0.001
@@ -199,7 +199,7 @@ const fetchWithPayment = x402Client({
 
 // Scan user input before sending to LLM
 const result = await fetchWithPayment(
-  "https://api.citadel.security/v1/scan/input",
+  "https://api.stronghold.security/v1/scan/input",
   {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -251,7 +251,7 @@ All scan endpoints return a standardized response:
 │   │   └── pricing.go           # Pricing info
 │   ├── middleware/x402.go       # Payment middleware
 │   ├── config/config.go         # Configuration
-│   └── citadel/client.go        # Scanner wrapper
+│   └── stronghold/client.go     # Scanner wrapper
 ├── go.mod
 ├── Dockerfile
 └── docker-compose.yml
@@ -271,7 +271,7 @@ AI Agent Clients
            │ 2. Payment verified
            ▼
 ┌─────────────────────┐
-│  Citadel Scanner    │
+│  Stronghold Scanner │
 │  - 4-layer scanning │
 └──────────┬──────────┘
            │ 3. Scan result
@@ -290,7 +290,7 @@ go test ./...
 ### Building
 
 ```bash
-go build -o citadel-api cmd/api/main.go
+go build -o stronghold-api cmd/api/main.go
 ```
 
 ### Development Mode

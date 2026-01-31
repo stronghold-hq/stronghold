@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"citadel-api/internal/middleware"
+	"stronghold/internal/middleware"
 
 	"github.com/gofiber/fiber/v3"
 )

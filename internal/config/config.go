@@ -8,10 +8,10 @@ import (
 
 // Config holds all service configuration
 type Config struct {
-	Server   ServerConfig
-	X402     X402Config
-	Citadel  CitadelConfig
-	Pricing  PricingConfig
+	Server    ServerConfig
+	X402      X402Config
+	Stronghold StrongholdConfig
+	Pricing   PricingConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -28,8 +28,8 @@ type X402Config struct {
 	Network         string
 }
 
-// CitadelConfig holds Citadel scanner configuration
-type CitadelConfig struct {
+// StrongholdConfig holds Stronghold scanner configuration
+type StrongholdConfig struct {
 	BlockThreshold   float64
 	WarnThreshold    float64
 	EnableHugot      bool
@@ -60,14 +60,14 @@ func Load() *Config {
 			FacilitatorURL: getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
 			Network:        getEnv("X402_NETWORK", "base-sepolia"),
 		},
-		Citadel: CitadelConfig{
-			BlockThreshold:  getFloat("CITADEL_BLOCK_THRESHOLD", 0.55),
-			WarnThreshold:   getFloat("CITADEL_WARN_THRESHOLD", 0.35),
-			EnableHugot:     getBool("CITADEL_ENABLE_HUGOT", true),
-			EnableSemantics: getBool("CITADEL_ENABLE_SEMANTICS", true),
+		Stronghold: StrongholdConfig{
+			BlockThreshold:  getFloat("STRONGHOLD_BLOCK_THRESHOLD", 0.55),
+			WarnThreshold:   getFloat("STRONGHOLD_WARN_THRESHOLD", 0.35),
+			EnableHugot:     getBool("STRONGHOLD_ENABLE_HUGOT", true),
+			EnableSemantics: getBool("STRONGHOLD_ENABLE_SEMANTICS", true),
 			HugotModelPath:  getEnv("HUGOT_MODEL_PATH", "./models"),
-			LLMProvider:     getEnv("CITADEL_LLM_PROVIDER", ""),
-			LLMAPIKey:       getEnv("CITADEL_LLM_API_KEY", ""),
+			LLMProvider:     getEnv("STRONGHOLD_LLM_PROVIDER", ""),
+			LLMAPIKey:       getEnv("STRONGHOLD_LLM_API_KEY", ""),
 		},
 		Pricing: PricingConfig{
 			ScanInput:     getFloat("PRICE_SCAN_INPUT", 0.001),

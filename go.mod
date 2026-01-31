@@ -1,9 +1,8 @@
-module citadel-api
+module stronghold
 
 go 1.25.5
 
 require (
-	github.com/coinbase/x402/go v0.0.0-20260131002651-d9c7ed559bbe
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
 	github.com/google/uuid v1.6.0
 )

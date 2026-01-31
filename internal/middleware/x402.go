@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"strings"
 
-	"citadel-api/internal/config"
+	"stronghold/internal/config"
 
 	"github.com/gofiber/fiber/v3"
 )

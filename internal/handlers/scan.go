@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"citadel-api/internal/citadel"
-	"citadel-api/internal/middleware"
+	"stronghold/internal/middleware"
+	"stronghold/internal/stronghold"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -10,12 +10,12 @@ import (
 
 // ScanHandler handles scan-related endpoints
 type ScanHandler struct {
-	scanner *citadel.Scanner
+	scanner *stronghold.Scanner
 	x402    *middleware.X402Middleware
 }
 
 // NewScanHandler creates a new scan handler
-func NewScanHandler(scanner *citadel.Scanner, x402 *middleware.X402Middleware) *ScanHandler {
+func NewScanHandler(scanner *stronghold.Scanner, x402 *middleware.X402Middleware) *ScanHandler {
 	return &ScanHandler{
 		scanner: scanner,
 		x402:    x402,
@@ -41,8 +41,8 @@ type ScanUnifiedRequest struct {
 
 // ScanMultiturnRequest represents a multi-turn scan request
 type ScanMultiturnRequest struct {
-	SessionID string         `json:"session_id"`
-	Turns     []citadel.Turn `json:"turns"`
+	SessionID string           `json:"session_id"`
+	Turns     []stronghold.Turn `json:"turns"`
 }
 
 // RegisterRoutes registers all scan routes
@@ -69,7 +69,7 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 // @Accept json
 // @Produce json
 // @Param request body ScanInputRequest true "Input scan request"
-// @Success 200 {object} citadel.ScanResult
+// @Success 200 {object} stronghold.ScanResult
 // @Failure 400 {object} map[string]string
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/input [post]
@@ -107,7 +107,7 @@ func (h *ScanHandler) ScanInput(c fiber.Ctx) error {
 // @Accept json
 // @Produce json
 // @Param request body ScanOutputRequest true "Output scan request"
-// @Success 200 {object} citadel.ScanResult
+// @Success 200 {object} stronghold.ScanResult
 // @Failure 400 {object} map[string]string
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/output [post]
@@ -145,7 +145,7 @@ func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
 // @Accept json
 // @Produce json
 // @Param request body ScanUnifiedRequest true "Unified scan request"
-// @Success 200 {object} citadel.ScanResult
+// @Success 200 {object} stronghold.ScanResult
 // @Failure 400 {object} map[string]string
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan [post]
@@ -194,7 +194,7 @@ func (h *ScanHandler) ScanUnified(c fiber.Ctx) error {
 // @Accept json
 // @Produce json
 // @Param request body ScanMultiturnRequest true "Multi-turn scan request"
-// @Success 200 {object} citadel.ScanResult
+// @Success 200 {object} stronghold.ScanResult
 // @Failure 400 {object} map[string]string
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/multiturn [post]

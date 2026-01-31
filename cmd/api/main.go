@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"citadel-api/internal/config"
-	"citadel-api/internal/server"
+	"stronghold/internal/config"
+	"stronghold/internal/server"
 )
 
 func main() {

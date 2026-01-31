@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"citadel-api/internal/citadel"
-	"citadel-api/internal/config"
-	"citadel-api/internal/handlers"
-	"citadel-api/internal/middleware"
+	"stronghold/internal/config"
+	"stronghold/internal/handlers"
+	"stronghold/internal/middleware"
+	"stronghold/internal/stronghold"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -21,20 +21,20 @@ import (
 type Server struct {
 	app     *fiber.App
 	config  *config.Config
-	scanner *citadel.Scanner
+	scanner *stronghold.Scanner
 }
 
 // New creates a new server instance
 func New(cfg *config.Config) (*Server, error) {
 	// Initialize scanner
-	scanner, err := citadel.NewScanner(&cfg.Citadel)
+	scanner, err := stronghold.NewScanner(&cfg.Stronghold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scanner: %w", err)
 	}
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName:      "Citadel API",
+		AppName:      "Stronghold API",
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		ErrorHandler: errorHandler,
@@ -110,7 +110,7 @@ func (s *Server) setupRoutes() {
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%s", s.config.Server.Port)
-	log.Printf("Starting Citadel API server on %s", addr)
+	log.Printf("Starting Stronghold API server on %s", addr)
 	return s.app.Listen(addr)
 }
 

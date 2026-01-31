@@ -1,10 +1,10 @@
-package citadel
+package stronghold
 
 import (
 	"context"
 	"time"
 
-	"citadel-api/internal/config"
+	"stronghold/internal/config"
 )
 
 // Decision represents the scan decision
@@ -26,20 +26,20 @@ type ScanResult struct {
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Scanner wraps the Citadel security scanner
+// Scanner wraps the Stronghold security scanner
 type Scanner struct {
-	config *config.CitadelConfig
-	// TODO: Add actual Citadel scanner when library is available
-	// scanner *citadel.Scanner
+	config *config.StrongholdConfig
+	// TODO: Add actual Stronghold scanner when library is available
+	// scanner *stronghold.Scanner
 }
 
-// NewScanner creates a new Citadel scanner wrapper
-func NewScanner(cfg *config.CitadelConfig) (*Scanner, error) {
+// NewScanner creates a new Stronghold scanner wrapper
+func NewScanner(cfg *config.StrongholdConfig) (*Scanner, error) {
 	s := &Scanner{
 		config: cfg,
 	}
 
-	// TODO: Initialize actual Citadel scanner
+	// TODO: Initialize actual Stronghold scanner
 	// s.scanner = citadel.New(cfg.BlockThreshold, cfg.WarnThreshold)
 
 	return s, nil
@@ -49,7 +49,7 @@ func NewScanner(cfg *config.CitadelConfig) (*Scanner, error) {
 func (s *Scanner) ScanInput(ctx context.Context, text string) (*ScanResult, error) {
 	start := time.Now()
 
-	// TODO: Replace with actual Citadel scanner call
+	// TODO: Replace with actual Stronghold scanner call
 	// result, err := s.scanner.ScanInput(ctx, text)
 
 	// Simulated scan for now - implement heuristics-based detection
@@ -82,7 +82,7 @@ func (s *Scanner) ScanInput(ctx context.Context, text string) (*ScanResult, erro
 func (s *Scanner) ScanOutput(ctx context.Context, text string) (*ScanResult, error) {
 	start := time.Now()
 
-	// TODO: Replace with actual Citadel scanner call
+	// TODO: Replace with actual Stronghold scanner call
 	score := s.credentialScan(text)
 
 	decision := DecisionAllow
@@ -171,7 +171,7 @@ type Turn struct {
 
 // heuristicScan performs basic heuristic-based scanning
 func (s *Scanner) heuristicScan(text string) float64 {
-	// TODO: Replace with actual Citadel heuristics
+	// TODO: Replace with actual Stronghold heuristics
 	// This is a placeholder implementation
 
 	patterns := []string{
@@ -282,6 +282,6 @@ func (s *Scanner) credentialScan(text string) float64 {
 
 // Close cleans up scanner resources
 func (s *Scanner) Close() error {
-	// TODO: Close actual Citadel scanner resources
+	// TODO: Close actual Stronghold scanner resources
 	return nil
 }

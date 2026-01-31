@@ -1,7 +1,7 @@
 # Citadel API - Caddy Reverse Proxy Configuration
 # Replace api.citadel.security with your actual domain
 
-api.citadel.security {
+api.stronghold.security {
     # Enable compression
     encode gzip zstd
 
