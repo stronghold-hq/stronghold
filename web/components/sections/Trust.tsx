@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Github, Lock, Server, Code2 } from 'lucide-react'
+import { Github, Server, Code2 } from 'lucide-react'
 
 const badges = [
   {
@@ -13,11 +13,6 @@ const badges = [
     icon: Server,
     label: 'Self-Hostable',
     description: 'Run on your infrastructure',
-  },
-  {
-    icon: Lock,
-    label: 'Non-Custodial',
-    description: 'You control your keys',
   },
   {
     icon: Github,
@@ -43,7 +38,7 @@ export default function Trust() {
         </motion.div>
 
         {/* Badges */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
           {badges.map((badge, index) => (
             <motion.div
               key={badge.label}

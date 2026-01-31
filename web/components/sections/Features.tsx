@@ -6,7 +6,6 @@ import {
   Lock,
   Network,
   Wallet,
-  Key,
   Zap,
 } from 'lucide-react'
 
@@ -31,15 +30,9 @@ const features = [
   },
   {
     icon: Wallet,
-    title: 'x402 Payments',
-    description: 'Pay-per-scan using USDC on Base. No subscriptions, no upfront costs. Only pay for what you use with crypto-native payments.',
+    title: 'Pay As You Go',
+    description: 'Pay-per-scan with no subscriptions or upfront costs. Only pay for what you use. Top up via dashboard with card or crypto.',
     highlight: '$0.001/scan',
-  },
-  {
-    icon: Key,
-    title: 'Local Wallet',
-    description: 'Private keys stored in your OS keyring (macOS Keychain, Linux Secret Service, Windows Credential). Keys never leave your device.',
-    highlight: 'Non-Custodial',
   },
   {
     icon: Zap,
@@ -70,7 +63,7 @@ export default function Features() {
           </h2>
           <p className="text-gray-400 text-lg max-w-2xl mx-auto">
             A complete security layer designed specifically for AI infrastructure.
-            Self-hosted, open source, and crypto-native.
+            Self-hosted, open source, and pay-as-you-go.
           </p>
         </motion.div>
 
