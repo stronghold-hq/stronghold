@@ -5,8 +5,8 @@ import { useState, useEffect } from 'react'
 
 const commands = [
   { prompt: '$ stronghold doctor', output: '✓ OS: Linux (Ubuntu 22.04)\n✓ Keyring: Secret Service available\n✓ Firewall: iptables installed\n✓ All checks passed!' },
-  { prompt: '$ stronghold install', output: 'Installing Stronghold...\n✓ Authenticated as user@example.com\n✓ Wallet created: 0x742d...8f3a\n✓ Proxy configured on port 8080\n✓ Installation complete!' },
-  { prompt: '$ stronghold wallet show', output: '💳 Stronghold Wallet\n\nAddress: 0x742d35Cc6634C0532925a3b844Bc9e7595f8f3a\nNetwork: Base Mainnet\nBalance: 12.450000 USDC' },
+  { prompt: '$ stronghold install', output: 'Installing Stronghold...\n✓ Authenticated as user@example.com\n✓ Account created: 0x742d...8f3a\n✓ Proxy configured on port 8080\n✓ Installation complete!' },
+  { prompt: '$ stronghold account balance', output: '💳 Account\n\nAccount ID: 0x742d35Cc6634C0532925a3b844Bc9e7595f8f3a\nBalance: 12.450000 USDC' },
   { prompt: '$ stronghold enable', output: 'Starting Stronghold proxy...\n✓ Proxy listening on 127.0.0.1:8080\n✓ iptables rules applied\n✓ Protection enabled' },
 ]
 
