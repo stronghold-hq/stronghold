@@ -71,7 +71,7 @@ func (s *Server) setupMiddleware() {
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization"},
 		ExposeHeaders:    []string{"X-PAYMENT-RESPONSE"},
-		AllowCredentials: true,
+		AllowCredentials: false, // Must be false when using wildcard origins
 		MaxAge:           300,
 	}))
 
