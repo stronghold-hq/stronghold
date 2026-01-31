@@ -45,6 +45,10 @@ go build -o stronghold-proxy ./cmd/proxy
 - **OS**: Linux or macOS
 - **Privileges**: Root/sudo required for `install`, `enable`, `disable`
 - **Firewall**: iptables or nftables (Linux), pf (macOS) - usually pre-installed
+- **Keyring** (Linux only): One of the following must be installed:
+  - GNOME Keyring / Secret Service (`gnome-keyring`)
+  - KWallet (pre-installed on KDE)
+  - pass (`pass` password-store)
 
 Run `stronghold doctor` to verify your system meets all requirements.
 
@@ -58,6 +62,9 @@ Run `stronghold doctor` to verify your system meets all requirements.
 | `stronghold disable` | Stop proxy and restore direct access | Yes |
 | `stronghold status` | Show proxy status and statistics | No |
 | `stronghold logs` | View proxy logs | No |
+| `stronghold wallet show` | Display wallet address and balance | No |
+| `stronghold wallet address` | Show wallet address (for scripts) | No |
+| `stronghold wallet balance` | Show wallet balance (for scripts) | No |
 | `stronghold uninstall` | Remove Stronghold from system | Yes |
 
 ### How It Works
@@ -88,6 +95,36 @@ The transparent proxy uses **iptables/nftables** (Linux) or **pf** (macOS) to in
 - Works for all processes automatically
 - Adds `X-Stronghold-Decision` headers to responses
 - Blocks malicious content before agents see it
+
+### Wallet Management
+
+Stronghold creates an Ethereum wallet during installation to pay for API scanning via the x402 protocol. Your private key is stored securely in your operating system's keyring.
+
+**View your wallet:**
+```bash
+stronghold wallet show
+```
+
+**Check balance (script-friendly):**
+```bash
+stronghold wallet balance
+```
+
+**Get address (script-friendly):**
+```bash
+stronghold wallet address
+```
+
+**Adding Funds:**
+1. Visit https://dashboard.stronghold.security
+2. Sign in with your account
+3. Use Stripe on-ramp or send USDC directly to your wallet address
+
+**Security Notes:**
+- Private keys never leave your device
+- Keys are stored in OS-native keyring (macOS Keychain, Linux Secret Service/KWallet/pass, Windows Credential)
+- Only your wallet address is shared with the backend for account linking
+- Low balance warnings appear in `wallet show` when below 1 USDC
 
 ### Architecture Overview
 
@@ -392,6 +429,9 @@ All scan endpoints return a standardized response:
 │   ├── middleware/x402.go       # Payment middleware
 │   ├── config/config.go         # Server configuration
 │   ├── stronghold/client.go     # Scanner wrapper
+│   ├── wallet/                  # Wallet management
+│   │   ├── wallet.go            # OS keyring wallet operations
+│   │   └── x402.go              # x402 payment creation/verification
 │   ├── cli/                     # CLI implementation
 │   │   ├── config.go            # CLI configuration
 │   │   ├── doctor.go            # Prerequisites check
@@ -400,6 +440,7 @@ All scan endpoints return a standardized response:
 │   │   ├── disable.go           # Disable proxy
 │   │   ├── status.go            # Status display
 │   │   ├── uninstall.go         # Uninstall
+│   │   ├── wallet.go            # Wallet CLI commands
 │   │   ├── service.go           # System service management
 │   │   └── transparent.go       # Transparent proxy (iptables/pf)
 │   └── proxy/                   # Proxy implementation
