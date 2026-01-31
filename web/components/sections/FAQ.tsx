@@ -14,8 +14,8 @@ const faqs = [
     answer: 'Stronghold uses iptables (Linux) or pf (macOS) to intercept all network traffic at the system level. This means it works with any AI agent without requiring code changes, environment variables, or proxy configuration. Traffic flows through Stronghold\'s scanning engine, which analyzes content for threats in real-time.',
   },
   {
-    question: 'What is x402 and why USDC?',
-    answer: 'x402 is an open protocol for internet payments that uses EIP-712 signed authorizations. We chose USDC on Base because it offers fast, low-cost transactions with finality in seconds. This enables true pay-per-scan pricing without subscriptions or upfront commitments.',
+    question: 'Why x402 as a payment method?',
+    answer: 'x402 is an open protocol designed specifically for pay-per-use APIs. Unlike subscriptions, you only pay for what you use—down to the individual scan. Your account is automatically topped up via the dashboard (Stripe, Coinbase Pay, Moonpay) or direct deposit. The crypto layer is completely abstracted: no seed phrases, no gas fees, no complexity. Just scan, pay, go.',
   },
   {
     question: 'Can I self-host Stronghold?',
