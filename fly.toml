@@ -1,4 +1,6 @@
-app = "stronghold-api"
+# App name is set via fly CLI or FLY_APP_NAME env var
+# Uncomment and set if deploying manually:
+# app = "your-app-name"
 primary_region = "iad"
 
 [build]
