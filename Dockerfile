@@ -16,6 +16,9 @@ COPY . .
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o stronghold-api ./cmd/api/main.go
 
+# Ensure models directory exists
+RUN mkdir -p models
+
 # Final stage
 FROM alpine:latest
 
@@ -27,7 +30,7 @@ RUN apk --no-cache add ca-certificates
 # Copy binary from builder
 COPY --from=builder /app/stronghold-api .
 
-# Copy any model files if they exist
+# Copy model files (directory will be empty if no models exist)
 COPY --from=builder /app/models ./models
 
 # Expose port
