@@ -160,12 +160,48 @@ Your wallet balance will be preserved unless you explicitly delete your account.
 			fmt.Printf("Logged in: %v\n", config.Auth.LoggedIn)
 			if config.Auth.LoggedIn {
 				fmt.Printf("User: %s\n", config.Auth.Email)
+				if config.Wallet.Address != "" {
+					fmt.Printf("Wallet: %s\n", config.Wallet.Address)
+				}
 			}
 			return nil
 		},
 	}
 
 	configCmd.AddCommand(configGetCmd)
+
+	// Wallet command
+	walletCmd := &cobra.Command{
+		Use:   "wallet",
+		Short: "Manage your Stronghold wallet",
+		Long:  `View wallet address, check balance, and manage your USDC funds.`,
+	}
+
+	walletShowCmd := &cobra.Command{
+		Use:   "show",
+		Short: "Display wallet information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletShow()
+		},
+	}
+
+	walletAddressCmd := &cobra.Command{
+		Use:   "address",
+		Short: "Show wallet address only (for scripts)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletAddress()
+		},
+	}
+
+	walletBalanceCmd := &cobra.Command{
+		Use:   "balance",
+		Short: "Show wallet balance only (for scripts)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletBalance()
+		},
+	}
+
+	walletCmd.AddCommand(walletShowCmd, walletAddressCmd, walletBalanceCmd)
 
 	// Doctor command
 	doctorCmd := &cobra.Command{
@@ -197,6 +233,7 @@ Run this before 'stronghold install' to catch issues early.`,
 		uninstallCmd,
 		logsCmd,
 		configCmd,
+		walletCmd,
 		doctorCmd,
 	)
 

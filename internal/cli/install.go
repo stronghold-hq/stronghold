@@ -227,13 +227,25 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 	case StateAuth:
 		if m.authChoice == 0 { // Login
 			if m.emailInput.Value() != "" && m.passwordInput.Value() != "" {
-				// Simulate login
+				// Simulate login - in production this would call the API
 				m.userEmail = m.emailInput.Value()
 				m.loggedIn = true
 				m.authToken = "simulated-jwt-token"
 				m.config.Auth.Token = m.authToken
 				m.config.Auth.Email = m.userEmail
+				m.config.Auth.UserID = "user-" + m.emailInput.Value() // Simulated user ID
 				m.config.Auth.LoggedIn = true
+
+				// Create wallet for user
+				walletAddress, err := SetupWallet(m.config.Auth.UserID, "base")
+				if err != nil {
+					m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet setup failed: %v", err)))
+				} else {
+					m.config.Wallet.Address = walletAddress
+					m.config.Wallet.Network = "base"
+					m.progress = append(m.progress, successStyle.Render("✓ Wallet created"))
+				}
+
 				m.state = StatePayment
 			}
 		} else if m.authChoice == 1 { // Signup
@@ -242,18 +254,27 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.authToken = "simulated-jwt-token"
 			m.config.Auth.Token = m.authToken
 			m.config.Auth.Email = m.userEmail
+			m.config.Auth.UserID = "user-" + m.emailInput.Value() // Simulated user ID
 			m.config.Auth.LoggedIn = true
+
+			// Create wallet for new user
+			walletAddress, err := SetupWallet(m.config.Auth.UserID, "base")
+			if err != nil {
+				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet setup failed: %v", err)))
+			} else {
+				m.config.Wallet.Address = walletAddress
+				m.config.Wallet.Network = "base"
+				m.progress = append(m.progress, successStyle.Render("✓ Wallet created"))
+			}
+
 			m.state = StatePayment
 		} else { // Skip
 			m.state = StatePayment
 		}
 
 	case StatePayment:
-		if m.paymentMethod == 0 {
-			m.config.Payments.Method = "stripe"
-		} else {
-			m.config.Payments.Method = "wallet"
-		}
+		// Payment method is now always the embedded wallet
+		m.config.Payments.Method = "wallet"
 		m.state = StateConfig
 		m.portInput.Focus()
 
@@ -408,27 +429,26 @@ func (m *InstallModel) viewPayment() string {
 
 	b.WriteString(headerStyle.Render("Payment Setup"))
 	b.WriteString("\n\n")
-	b.WriteString("Choose payment method:\n\n")
 
-	methods := []struct {
-		name        string
-		description string
-	}{
-		{"Credit Card (Stripe)", "Recommended - Easy setup, auto top-up"},
-		{"Crypto Wallet (x402 direct)", "Connect your own wallet"},
-	}
-
-	for i, method := range methods {
-		if i == m.paymentMethod {
-			b.WriteString(selectedStyle.Render(fmt.Sprintf("▸ [%d] %s", i+1, method.name)))
-		} else {
-			b.WriteString(unselectedStyle.Render(fmt.Sprintf("  [%d] %s", i+1, method.name)))
-		}
-		b.WriteString("\n")
-		b.WriteString(infoStyle.Render(fmt.Sprintf("    %s", method.description)))
+	if m.config.Wallet.Address != "" {
+		b.WriteString("Your Stronghold wallet has been created:\n\n")
+		b.WriteString("Address:\n")
+		b.WriteString(selectedStyle.Render(fmt.Sprintf("  %s", m.config.Wallet.Address)))
 		b.WriteString("\n\n")
+		b.WriteString("Fund your wallet to start using Stronghold:\n\n")
+		b.WriteString(infoStyle.Render("  1. Visit https://dashboard.stronghold.security"))
+		b.WriteString("\n")
+		b.WriteString(infoStyle.Render("  2. Sign in with your account"))
+		b.WriteString("\n")
+		b.WriteString(infoStyle.Render("  3. Use Stripe on-ramp to buy USDC, or send directly"))
+		b.WriteString("\n\n")
+		b.WriteString("Or send USDC on Base directly to the address above.")
+	} else {
+		b.WriteString("No wallet configured. You can skip funding for now,")
+		b.WriteString("\nbut you'll need to add funds before using Stronghold.")
 	}
 
+	b.WriteString("\n\n")
 	b.WriteString(infoStyle.Render("Press Enter to continue"))
 
 	return b.String()
@@ -480,9 +500,18 @@ func (m *InstallModel) viewComplete() string {
 	b.WriteString("attacks before reaching your agents.\n\n")
 	b.WriteString("This cannot be bypassed by applications.\n\n")
 
+	if m.config.Wallet.Address != "" {
+		b.WriteString(headerStyle.Render("Your Wallet:"))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %s\n\n", m.config.Wallet.Address))
+		b.WriteString(infoStyle.Render("Fund this address with USDC on Base to start scanning.\n"))
+		b.WriteString(infoStyle.Render("Visit https://dashboard.stronghold.security to add funds.\n\n"))
+	}
+
 	b.WriteString(headerStyle.Render("Quick Commands:"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("  Status:    stronghold status\n"))
+	b.WriteString(fmt.Sprintf("  Wallet:    stronghold wallet show\n"))
 	b.WriteString(fmt.Sprintf("  Disable:   stronghold disable\n"))
 	b.WriteString(fmt.Sprintf("  Dashboard: https://dashboard.stronghold.security\n"))
 	b.WriteString(fmt.Sprintf("  Usage:     ~$0.001 per scanned request\n\n"))

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"stronghold/internal/wallet"
 )
 
 // Decision represents the scan decision
@@ -51,9 +53,11 @@ type ScanRequest struct {
 
 // ScannerClient is a client for the Stronghold scanning API
 type ScannerClient struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL       string
+	token         string
+	httpClient    *http.Client
+	wallet        *wallet.Wallet
+	facilitatorURL string
 }
 
 // NewScannerClient creates a new scanner client
@@ -64,7 +68,13 @@ func NewScannerClient(baseURL, token string) *ScannerClient {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		facilitatorURL: "https://x402.org/facilitator",
 	}
+}
+
+// SetWallet sets the wallet for x402 payments
+func (c *ScannerClient) SetWallet(w *wallet.Wallet) {
+	c.wallet = w
 }
 
 // ScanContent scans content for prompt injection attacks
@@ -76,7 +86,7 @@ func (c *ScannerClient) ScanContent(ctx context.Context, content []byte, sourceU
 		ContentType: contentType,
 	}
 
-	return c.scan(ctx, "/v1/scan/content", req)
+	return c.scanWithPayment(ctx, "/v1/scan/content", req)
 }
 
 // Scan scans content using the unified endpoint
@@ -86,45 +96,132 @@ func (c *ScannerClient) Scan(ctx context.Context, content []byte, mode string) (
 		"mode": mode,
 	}
 
-	return c.scan(ctx, "/v1/scan", reqBody)
+	return c.scanWithPayment(ctx, "/v1/scan", reqBody)
+}
+
+// scanWithPayment performs a scan request with automatic x402 payment handling
+func (c *ScannerClient) scanWithPayment(ctx context.Context, endpoint string, reqBody interface{}) (*ScanResult, error) {
+	// Try the request first (might already have credit or in dev mode)
+	result, statusCode, paymentReq, err := c.scan(ctx, endpoint, reqBody, "")
+	
+	// If successful or error other than 402, return immediately
+	if err != nil || statusCode != http.StatusPaymentRequired {
+		return result, err
+	}
+
+	// Handle 402 Payment Required
+	if paymentReq == nil {
+		return nil, fmt.Errorf("payment required but no requirements received")
+	}
+
+	// Check if we have a wallet
+	if c.wallet == nil {
+		return nil, fmt.Errorf("payment required but no wallet configured. Run 'stronghold wallet show' to check your balance or visit https://dashboard.stronghold.security to add funds")
+	}
+
+	// Create x402 payment
+	paymentHeader, err := c.wallet.CreateX402Payment(paymentReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create payment: %w", err)
+	}
+
+	// Retry with payment
+	result, statusCode, _, err = c.scan(ctx, endpoint, reqBody, paymentHeader)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusPaymentRequired {
+		return nil, fmt.Errorf("payment was rejected - insufficient funds or invalid payment. Check your balance with 'stronghold wallet balance'")
+	}
+
+	return result, nil
 }
 
 // scan performs the actual scan request
-func (c *ScannerClient) scan(ctx context.Context, endpoint string, reqBody interface{}) (*ScanResult, error) {
+// Returns: result, statusCode, paymentRequirements (if 402), error
+func (c *ScannerClient) scan(ctx context.Context, endpoint string, reqBody interface{}, paymentHeader string) (*ScanResult, int, *wallet.PaymentRequirements, error) {
 	url := c.baseURL + endpoint
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, 0, nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, 0, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	if paymentHeader != "" {
+		req.Header.Set("X-Payment", paymentHeader)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, 0, nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Handle 402 Payment Required
+	if resp.StatusCode == http.StatusPaymentRequired {
+		paymentReq, err := c.parsePaymentRequired(resp)
+		if err != nil {
+			return nil, resp.StatusCode, nil, fmt.Errorf("payment required but failed to parse requirements: %w", err)
+		}
+		return nil, resp.StatusCode, paymentReq, nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("scan failed: %s - %s", resp.Status, string(body))
+		return nil, resp.StatusCode, nil, fmt.Errorf("scan failed: %s - %s", resp.Status, string(body))
 	}
 
 	var result ScanResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, resp.StatusCode, nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &result, nil
+	return &result, resp.StatusCode, nil, nil
+}
+
+// parsePaymentRequired parses a 402 response to extract payment requirements
+func (c *ScannerClient) parsePaymentRequired(resp *http.Response) (*wallet.PaymentRequirements, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var response struct {
+		Error               string `json:"error"`
+		PaymentRequirements struct {
+			Scheme          string `json:"scheme"`
+			Network         string `json:"network"`
+			Recipient       string `json:"recipient"`
+			Amount          string `json:"amount"`
+			Currency        string `json:"currency"`
+			FacilitatorURL  string `json:"facilitator_url"`
+			Description     string `json:"description"`
+		} `json:"payment_requirements"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse 402 response: %w", err)
+	}
+
+	return &wallet.PaymentRequirements{
+		Scheme:         response.PaymentRequirements.Scheme,
+		Network:        response.PaymentRequirements.Network,
+		Recipient:      response.PaymentRequirements.Recipient,
+		Amount:         response.PaymentRequirements.Amount,
+		Currency:       response.PaymentRequirements.Currency,
+		FacilitatorURL: response.PaymentRequirements.FacilitatorURL,
+		Description:    response.PaymentRequirements.Description,
+	}, nil
 }
 
 // ShouldScanContentType determines if a content type should be scanned

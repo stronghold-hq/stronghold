@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"stronghold/internal/wallet"
 )
 
 // Config holds the proxy configuration
@@ -22,8 +23,15 @@ type Config struct {
 	Proxy     ProxyConfig     `yaml:"proxy"`
 	API       APIConfig       `yaml:"api"`
 	Auth      AuthConfig      `yaml:"auth"`
+	Wallet    WalletConfig    `yaml:"wallet"`
 	Scanning  ScanningConfig  `yaml:"scanning"`
 	Logging   LoggingConfig   `yaml:"logging"`
+}
+
+// WalletConfig holds wallet configuration
+type WalletConfig struct {
+	Address string `yaml:"address"`
+	Network string `yaml:"network"`
 }
 
 // ProxyConfig holds proxy-specific configuration
@@ -42,6 +50,7 @@ type APIConfig struct {
 type AuthConfig struct {
 	Token    string `yaml:"token"`
 	Email    string `yaml:"email"`
+	UserID   string `yaml:"user_id"`
 	LoggedIn bool   `yaml:"logged_in"`
 }
 
@@ -67,6 +76,7 @@ func (c *Config) GetProxyAddr() string {
 type Server struct {
 	config         *Config
 	scanner        *ScannerClient
+	wallet         *wallet.Wallet
 	httpServer     *http.Server
 	listener       net.Listener
 	logger         *log.Logger
@@ -95,6 +105,21 @@ func NewServer(config *Config) (*Server, error) {
 		config:  config,
 		scanner: scanner,
 		logger:  logger,
+	}
+
+	// Load wallet if configured
+	if config.Auth.UserID != "" && config.Wallet.Address != "" {
+		w, err := wallet.New(wallet.Config{
+			UserID:  config.Auth.UserID,
+			Network: config.Wallet.Network,
+		})
+		if err != nil {
+			logger.Printf("Warning: failed to load wallet: %v", err)
+		} else if w.Exists() {
+			s.wallet = w
+			scanner.SetWallet(w)
+			logger.Printf("Wallet loaded: %s", config.Wallet.Address)
+		}
 	}
 
 	// Setup HTTP server

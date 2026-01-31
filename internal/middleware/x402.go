@@ -1,20 +1,25 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
 	"strings"
+	"time"
 
 	"stronghold/internal/config"
+	"stronghold/internal/wallet"
 
 	"github.com/gofiber/fiber/v3"
 )
 
 // X402Middleware creates x402 payment verification middleware
 type X402Middleware struct {
-	config  *config.X402Config
-	pricing *config.PricingConfig
+	config         *config.X402Config
+	pricing        *config.PricingConfig
+	httpClient     *http.Client
 }
 
 // NewX402Middleware creates a new x402 middleware instance
@@ -22,6 +27,9 @@ func NewX402Middleware(cfg *config.X402Config, pricing *config.PricingConfig) *X
 	return &X402Middleware{
 		config:  cfg,
 		pricing: pricing,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -50,11 +58,11 @@ func (m *X402Middleware) RequirePayment(price float64) fiber.Handler {
 			return c.Next()
 		}
 
-		// Convert price to wei (assuming 6 decimal places for USDC)
+		// Convert price to wei (6 decimal places for USDC)
 		priceWei := float64ToWei(price)
 
 		// Check for payment header
-		paymentHeader := c.Get("X-PAYMENT")
+		paymentHeader := c.Get("X-Payment")
 		if paymentHeader == "" {
 			// Return 402 with payment requirements
 			return m.requirePaymentResponse(c, priceWei)
@@ -78,44 +86,152 @@ func (m *X402Middleware) requirePaymentResponse(c fiber.Ctx, amount *big.Int) er
 	response := map[string]interface{}{
 		"error": "Payment required",
 		"payment_requirements": map[string]interface{}{
-			"scheme":           "x402",
-			"network":          m.config.Network,
-			"recipient":        m.config.WalletAddress,
-			"amount":           amount.String(),
-			"currency":         "USDC",
-			"facilitator_url":  m.config.FacilitatorURL,
-			"description":      "Citadel security scan",
+			"scheme":          "x402",
+			"network":         m.config.Network,
+			"recipient":       m.config.WalletAddress,
+			"amount":          amount.String(),
+			"currency":        "USDC",
+			"facilitator_url": m.config.FacilitatorURL,
+			"description":     "Citadel security scan",
 		},
 	}
 
 	return c.JSON(response)
 }
 
-// verifyPayment verifies the x402 payment header
+// verifyPayment verifies the x402 payment header via the facilitator
 func (m *X402Middleware) verifyPayment(paymentHeader string, expectedAmount *big.Int) (bool, error) {
-	// TODO: Integrate with actual x402-go verification
-	// For now, do basic validation
-
-	// Parse payment header (format: "x402 scheme;payload")
-	parts := strings.SplitN(paymentHeader, ";", 2)
-	if len(parts) != 2 {
-		return false, fmt.Errorf("invalid payment header format")
+	// Parse payment header
+	payload, err := wallet.ParseX402Payment(paymentHeader)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse payment: %w", err)
 	}
 
-	scheme := strings.TrimSpace(parts[0])
-	if scheme != "x402" {
-		return false, fmt.Errorf("unsupported payment scheme: %s", scheme)
+	// Verify the amount matches
+	amount := new(big.Int)
+	amount.SetString(payload.Amount, 10)
+	if amount.Cmp(expectedAmount) != 0 {
+		return false, fmt.Errorf("amount mismatch: expected %s, got %s", expectedAmount.String(), payload.Amount)
 	}
 
-	// TODO: Call x402 facilitator to verify payment
-	// This would:
-	// 1. Parse the payment payload
-	// 2. Call facilitator to verify
-	// 3. Check amount matches expected
-	// 4. Verify payment is not already spent
+	// Verify the recipient is our wallet
+	if !strings.EqualFold(payload.Receiver, m.config.WalletAddress) {
+		return false, fmt.Errorf("recipient mismatch: expected %s, got %s", m.config.WalletAddress, payload.Receiver)
+	}
 
-	// For now, accept any well-formed header in dev mode
+	// Verify payment signature
+	if err := wallet.VerifyPaymentSignature(payload, payload.Payer); err != nil {
+		return false, fmt.Errorf("invalid signature: %w", err)
+	}
+
+	// Call facilitator to verify payment is valid and not already spent
+	verifyReq := struct {
+		Payment  string `json:"payment"`
+		Network  string `json:"network"`
+		Amount   string `json:"amount"`
+		Receiver string `json:"receiver"`
+		Token    string `json:"token"`
+	}{
+		Payment:  paymentHeader,
+		Network:  payload.Network,
+		Amount:   payload.Amount,
+		Receiver: payload.Receiver,
+		Token:    payload.TokenAddress,
+	}
+
+	verifyBody, err := json.Marshal(verifyReq)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal verify request: %w", err)
+	}
+
+	facilitatorURL := m.config.FacilitatorURL
+	if facilitatorURL == "" {
+		facilitatorURL = "https://x402.org/facilitator"
+	}
+
+	resp, err := m.httpClient.Post(
+		facilitatorURL+"/verify",
+		"application/json",
+		bytes.NewReader(verifyBody),
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to call facilitator: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("facilitator verification failed: %s", resp.Status)
+	}
+
+	var verifyResult struct {
+		Valid   bool   `json:"valid"`
+		Reason  string `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&verifyResult); err != nil {
+		return false, fmt.Errorf("failed to decode verify response: %w", err)
+	}
+
+	if !verifyResult.Valid {
+		return false, fmt.Errorf("payment invalid: %s", verifyResult.Reason)
+	}
+
 	return true, nil
+}
+
+// settlePayment settles the payment with the facilitator
+func (m *X402Middleware) settlePayment(paymentHeader string) (string, error) {
+	payload, err := wallet.ParseX402Payment(paymentHeader)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse payment: %w", err)
+	}
+
+	settleReq := struct {
+		Payment  string `json:"payment"`
+		Network  string `json:"network"`
+		Amount   string `json:"amount"`
+		Receiver string `json:"receiver"`
+		Token    string `json:"token"`
+	}{
+		Payment:  paymentHeader,
+		Network:  payload.Network,
+		Amount:   payload.Amount,
+		Receiver: payload.Receiver,
+		Token:    payload.TokenAddress,
+	}
+
+	settleBody, err := json.Marshal(settleReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal settle request: %w", err)
+	}
+
+	facilitatorURL := m.config.FacilitatorURL
+	if facilitatorURL == "" {
+		facilitatorURL = "https://x402.org/facilitator"
+	}
+
+	resp, err := m.httpClient.Post(
+		facilitatorURL+"/settle",
+		"application/json",
+		bytes.NewReader(settleBody),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to call facilitator: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("facilitator settlement failed: %s", resp.Status)
+	}
+
+	var settleResult struct {
+		PaymentID string `json:"payment_id"`
+		TxHash    string `json:"tx_hash,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&settleResult); err != nil {
+		return "", fmt.Errorf("failed to decode settle response: %w", err)
+	}
+
+	return settleResult.PaymentID, nil
 }
 
 // PaymentResponse adds payment response header after successful processing
@@ -130,7 +246,7 @@ func (m *X402Middleware) PaymentResponse(c fiber.Ctx, paymentID string) {
 	}
 
 	responseJSON, _ := json.Marshal(response)
-	c.Set("X-PAYMENT-RESPONSE", string(responseJSON))
+	c.Set("X-Payment-Response", string(responseJSON))
 }
 
 // float64ToWei converts a dollar amount to wei (6 decimals for USDC)
@@ -179,7 +295,7 @@ func (m *X402Middleware) Middleware() fiber.Handler {
 		}
 
 		// Check payment
-		paymentHeader := c.Get("X-PAYMENT")
+		paymentHeader := c.Get("X-Payment")
 		if paymentHeader == "" {
 			return m.requirePaymentResponse(c, float64ToWei(price))
 		}
@@ -189,7 +305,40 @@ func (m *X402Middleware) Middleware() fiber.Handler {
 			return m.requirePaymentResponse(c, float64ToWei(price))
 		}
 
+		// Store payment header for settlement after successful handler
+		c.Locals("x402_payment", paymentHeader)
+
 		return c.Next()
+	}
+}
+
+// SettleAfterHandler settles the payment after the handler completes successfully
+func (m *X402Middleware) SettleAfterHandler() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		// Continue to next handler first
+		err := c.Next()
+		if err != nil {
+			return err
+		}
+
+		// Check if there's a payment to settle
+		paymentHeader, ok := c.Locals("x402_payment").(string)
+		if !ok || paymentHeader == "" {
+			return nil
+		}
+
+		// Only settle if response is successful
+		if c.Response().StatusCode() >= 200 && c.Response().StatusCode() < 300 {
+			paymentID, err := m.settlePayment(paymentHeader)
+			if err != nil {
+				// Log but don't fail the request - payment was already verified
+				fmt.Printf("Failed to settle payment: %v\n", err)
+			} else {
+				m.PaymentResponse(c, paymentID)
+			}
+		}
+
+		return nil
 	}
 }
 
@@ -220,14 +369,12 @@ func NewX402Client(facilitatorURL, network string) *X402Client {
 
 // VerifyPayment verifies a payment with the facilitator
 func (c *X402Client) VerifyPayment(payment string, amount *big.Int) (bool, error) {
-	// TODO: Implement actual facilitator call
-	// This would make an HTTP request to the facilitator
+	// This is now handled by the middleware
 	return true, nil
 }
 
 // SettlePayment settles a payment with the facilitator
 func (c *X402Client) SettlePayment(payment string) (string, error) {
-	// TODO: Implement actual settlement
-	// Returns payment ID
+	// This is now handled by the middleware
 	return "payment-id", nil
 }

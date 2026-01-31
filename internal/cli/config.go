@@ -33,6 +33,12 @@ type AuthConfig struct {
 	LoggedIn bool   `yaml:"logged_in"`
 }
 
+// WalletConfig holds wallet configuration
+type WalletConfig struct {
+	Address string `yaml:"address"`
+	Network string `yaml:"network"`
+}
+
 // PaymentsConfig holds payment configuration
 type PaymentsConfig struct {
 	Method         string  `yaml:"method"`
@@ -66,16 +72,17 @@ type UsageStats struct {
 
 // CLIConfig holds the complete CLI configuration
 type CLIConfig struct {
-	Version   string          `yaml:"version"`
-	Proxy     ProxyConfig     `yaml:"proxy"`
-	API       APIConfig       `yaml:"api"`
-	Auth      AuthConfig      `yaml:"auth"`
-	Payments  PaymentsConfig  `yaml:"payments"`
-	Scanning  ScanningConfig  `yaml:"scanning"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Stats     UsageStats      `yaml:"stats"`
-	Installed bool            `yaml:"installed"`
-	InstallDate string        `yaml:"install_date,omitempty"`
+	Version     string         `yaml:"version"`
+	Proxy       ProxyConfig    `yaml:"proxy"`
+	API         APIConfig      `yaml:"api"`
+	Auth        AuthConfig     `yaml:"auth"`
+	Wallet      WalletConfig   `yaml:"wallet"`
+	Payments    PaymentsConfig `yaml:"payments"`
+	Scanning    ScanningConfig `yaml:"scanning"`
+	Logging     LoggingConfig  `yaml:"logging"`
+	Stats       UsageStats     `yaml:"stats"`
+	Installed   bool           `yaml:"installed"`
+	InstallDate string         `yaml:"install_date,omitempty"`
 }
 
 // DefaultConfig returns a default configuration
@@ -93,6 +100,9 @@ func DefaultConfig() *CLIConfig {
 		},
 		Auth: AuthConfig{
 			LoggedIn: false,
+		},
+		Wallet: WalletConfig{
+			Network: "base",
 		},
 		Payments: PaymentsConfig{
 			Method:         "stripe",

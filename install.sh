@@ -82,6 +82,215 @@ check_dependencies() {
     print_success "All dependencies satisfied"
 }
 
+# Detect Linux distribution
+detect_distro() {
+    if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+        return
+    fi
+
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO=$ID
+        DISTRO_NAME=$NAME
+    elif command -v lsb_release &> /dev/null; then
+        DISTRO=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+        DISTRO_NAME=$(lsb_release -sd)
+    else
+        DISTRO="unknown"
+        DISTRO_NAME="Unknown Linux"
+    fi
+
+    print_info "Detected distribution: $DISTRO_NAME"
+}
+
+# Check if a keyring backend is available
+check_keyring_available() {
+    # Check for Secret Service (GNOME Keyring, KWallet5+)
+    if command -v secret-tool &> /dev/null; then
+        return 0
+    fi
+    # Check for KWallet
+    if command -v kwalletd5 &> /dev/null || command -v kwalletd6 &> /dev/null; then
+        return 0
+    fi
+    # Check for pass
+    if command -v pass &> /dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Show manual installation instructions for keyring
+show_manual_keyring_instructions() {
+    echo
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Manual Keyring Installation Instructions"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+    echo "Stronghold requires a secure keyring to store your wallet"
+    echo "private keys. The following options are supported:"
+    echo
+    echo "1. GNOME Keyring / Secret Service (recommended for most users)"
+    echo "   Debian/Ubuntu:    sudo apt-get install gnome-keyring"
+    echo "   RHEL/CentOS:      sudo yum install gnome-keyring"
+    echo "   Fedora:           sudo dnf install gnome-keyring"
+    echo "   Arch:             sudo pacman -S gnome-keyring"
+    echo "   openSUSE:         sudo zypper install gnome-keyring"
+    echo
+    echo "2. KWallet (for KDE Plasma users)"
+    echo "   Usually pre-installed with KDE Plasma"
+    echo "   Debian/Ubuntu:    sudo apt-get install kwalletmanager"
+    echo
+    echo "3. pass (password-store, works on headless servers)"
+    echo "   Debian/Ubuntu:    sudo apt-get install pass"
+    echo "   RHEL/CentOS:      sudo yum install pass"
+    echo "   Fedora:           sudo dnf install pass"
+    echo "   Arch:             sudo pacman -S pass"
+    echo "   Then initialize:  gpg --gen-key && pass init <your-email>"
+    echo
+    echo "After installing one of the above, re-run this installer."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+}
+
+# Install keyring dependencies for Linux
+install_keyring_deps() {
+    if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+        # macOS and Windows have built-in keyrings
+        return 0
+    fi
+
+    print_info "Checking for secure keyring..."
+
+    if check_keyring_available; then
+        print_success "Secure keyring is available"
+        return 0
+    fi
+
+    echo
+    print_warning "No secure keyring detected on your system"
+    echo
+    echo "Stronghold uses your operating system's keyring to securely"
+    echo "store wallet private keys. We detected that you don't have"
+    echo "one of the supported keyrings installed."
+    echo
+
+    # Check if we can auto-install
+    if ! command -v sudo &> /dev/null; then
+        print_warning "sudo is not available - cannot auto-install dependencies"
+        show_manual_keyring_instructions
+        exit 1
+    fi
+
+    if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+        print_warning "Root access required to install dependencies"
+        print_info "You will be prompted for your password"
+        echo
+    fi
+
+    # Try to auto-install based on distro
+    detect_distro
+
+    echo "Would you like us to install the required dependencies?"
+    echo "  - gnome-keyring (secure key storage)"
+    echo "  - dbus-x11 (required for keyring communication)"
+    echo
+    printf "Install automatically? [Y/n] "
+    read -r response
+    response=${response:-Y}
+
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        show_manual_keyring_instructions
+        exit 1
+    fi
+
+    print_info "Installing keyring dependencies..."
+
+    case "$DISTRO" in
+        ubuntu|debian)
+            echo "  → Running: sudo apt-get update"
+            if ! sudo apt-get update -qq; then
+                print_error "Failed to update package lists"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            echo "  → Running: sudo apt-get install -y gnome-keyring dbus-x11"
+            if ! sudo apt-get install -y gnome-keyring dbus-x11; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        fedora)
+            echo "  → Running: sudo dnf install -y gnome-keyring dbus-x11"
+            if ! sudo dnf install -y gnome-keyring dbus-x11; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        rhel|centos|almalinux|rocky)
+            echo "  → Running: sudo yum install -y gnome-keyring dbus-x11"
+            if ! sudo yum install -y gnome-keyring dbus-x11; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        arch|manjaro)
+            echo "  → Running: sudo pacman -S --noconfirm gnome-keyring dbus"
+            if ! sudo pacman -S --noconfirm gnome-keyring dbus; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        opensuse*)
+            echo "  → Running: sudo zypper install -y gnome-keyring dbus-1-x11"
+            if ! sudo zypper install -y gnome-keyring dbus-1-x11; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        alpine)
+            echo "  → Running: sudo apk add gnome-keyring dbus"
+            if ! sudo apk add gnome-keyring dbus; then
+                print_error "Failed to install packages"
+                show_manual_keyring_instructions
+                exit 1
+            fi
+            ;;
+
+        *)
+            print_error "Unsupported distribution: $DISTRO_NAME"
+            echo
+            echo "We couldn't automatically install dependencies for your distribution."
+            show_manual_keyring_instructions
+            exit 1
+            ;;
+    esac
+
+    # Verify installation
+    if check_keyring_available; then
+        print_success "Keyring dependencies installed successfully"
+    else
+        print_warning "Packages installed but keyring may need configuration"
+        echo
+        echo "You may need to:"
+        echo "  1. Log out and log back in"
+        echo "  2. Or restart your system"
+        echo
+        echo "Then run 'stronghold install' again."
+        exit 1
+    fi
+}
+
 # Download and install
 download_and_install() {
     print_info "Downloading Stronghold..."
@@ -192,6 +401,7 @@ main() {
 
     detect_platform
     check_dependencies
+    install_keyring_deps
 
     # Check if we should build from source
     if [ "${BUILD_FROM_SOURCE:-false}" = "true" ] || [ -f "go.mod" ] && grep -q "module stronghold" go.mod 2>/dev/null; then

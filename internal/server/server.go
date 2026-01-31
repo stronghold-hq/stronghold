@@ -52,6 +52,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// Setup routes
 	s.setupRoutes()
 
+	// Setup post-route middleware (for payment settlement)
+	s.setupPostMiddleware()
+
 	return s, nil
 }
 
@@ -78,6 +81,13 @@ func (s *Server) setupMiddleware() {
 	// x402 payment middleware (applied to all routes)
 	x402 := middleware.NewX402Middleware(&s.config.X402, &s.config.Pricing)
 	s.app.Use(x402.Middleware())
+}
+
+// setupPostMiddleware configures middleware that runs after routes
+func (s *Server) setupPostMiddleware() {
+	// x402 settlement middleware (settles payments after successful responses)
+	x402 := middleware.NewX402Middleware(&s.config.X402, &s.config.Pricing)
+	s.app.Use(x402.SettleAfterHandler())
 }
 
 // setupRoutes configures all routes
