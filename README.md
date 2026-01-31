@@ -2,6 +2,100 @@
 
 A pay-per-request API service that wraps the Stronghold AI security scanner with x402 crypto payment integration. Enables AI agents to proxy requests through crypto payments to detect prompt injection attacks and credential leaks.
 
+## Client Proxy (NEW)
+
+The Stronghold CLI provides a **transparent proxy** that intercepts ALL HTTP/HTTPS traffic at the network level, scanning content before it reaches your AI agents. This is designed for isolated machines running AI agents.
+
+### Quick Start
+
+```bash
+# Check if your system is ready
+stronghold doctor
+
+# Install Stronghold (interactive setup)
+sudo stronghold install
+
+# Enable protection (starts transparent proxy)
+sudo stronghold enable
+
+# Check status
+stronghold status
+
+# Disable protection
+sudo stronghold disable
+```
+
+### Installation
+
+**One-line installer:**
+```bash
+curl -fsSL https://install.stronghold.security | sh
+```
+
+**Or build from source:**
+```bash
+git clone https://github.com/yv-was-taken/stronghold.git
+cd stronghold
+go build -o stronghold ./cmd/cli
+go build -o stronghold-proxy ./cmd/proxy
+```
+
+### Prerequisites
+
+- **OS**: Linux or macOS
+- **Privileges**: Root/sudo required for `install`, `enable`, `disable`
+- **Firewall**: iptables or nftables (Linux), pf (macOS) - usually pre-installed
+
+Run `stronghold doctor` to verify your system meets all requirements.
+
+### CLI Commands
+
+| Command | Description | Requires Root |
+|---------|-------------|---------------|
+| `stronghold doctor` | Check system prerequisites | No |
+| `stronghold install` | Interactive installation | Yes |
+| `stronghold enable` | Start proxy and enable traffic interception | Yes |
+| `stronghold disable` | Stop proxy and restore direct access | Yes |
+| `stronghold status` | Show proxy status and statistics | No |
+| `stronghold logs` | View proxy logs | No |
+| `stronghold uninstall` | Remove Stronghold from system | Yes |
+
+### How It Works
+
+The transparent proxy uses **iptables/nftables** (Linux) or **pf** (macOS) to intercept traffic at the network level:
+
+```
+┌─────────────────────────────────────────────┐
+│  Agent makes HTTP request                   │
+│       │                                     │
+│       ▼                                     │
+│  Kernel intercepts (iptables/pf)            │
+│       │                                     │
+│       ▼                                     │
+│  Stronghold Proxy (localhost:8080)          │
+│       │                                     │
+│       ├── Fetches content from destination  │
+│       ├── Scans with Stronghold API         │
+│       └── Returns ALLOW/WARN/BLOCK          │
+│       │                                     │
+│       ▼                                     │
+│  Response returned to agent                 │
+└─────────────────────────────────────────────┘
+```
+
+**Key features:**
+- Cannot be bypassed by applications (unlike HTTP_PROXY env vars)
+- Works for all processes automatically
+- Adds `X-Stronghold-Decision` headers to responses
+- Blocks malicious content before agents see it
+
+### Architecture Overview
+
+The project now consists of two main components:
+
+1. **API Server** (`cmd/api/`) - The pay-per-request scanning service
+2. **Client Proxy** (`cmd/cli/`, `cmd/proxy/`) - Local transparent proxy for agents
+
 ## Features
 
 - **4-Layer Security Scanning**: Heuristics, ML classification, semantic similarity, and LLM classification
@@ -285,19 +379,36 @@ All scan endpoints return a standardized response:
 
 ```
 .
-├── cmd/api/main.go              # Entry point
+├── cmd/
+│   ├── api/main.go              # API server entry point
+│   ├── cli/main.go              # CLI client entry point
+│   └── proxy/main.go            # Proxy daemon entry point
 ├── internal/
 │   ├── server/server.go         # HTTP server setup
-│   ├── handlers/
-│   │   ├── scan.go              # Scan endpoints
-│   │   ├── health.go            # Health checks
-│   │   └── pricing.go           # Pricing info
+│   ├── handlers/                # API endpoints
+│   │   ├── scan.go
+│   │   ├── health.go
+│   │   └── pricing.go
 │   ├── middleware/x402.go       # Payment middleware
-│   ├── config/config.go         # Configuration
-│   └── stronghold/client.go     # Scanner wrapper
+│   ├── config/config.go         # Server configuration
+│   ├── stronghold/client.go     # Scanner wrapper
+│   ├── cli/                     # CLI implementation
+│   │   ├── config.go            # CLI configuration
+│   │   ├── doctor.go            # Prerequisites check
+│   │   ├── install.go           # Interactive installer
+│   │   ├── enable.go            # Enable proxy
+│   │   ├── disable.go           # Disable proxy
+│   │   ├── status.go            # Status display
+│   │   ├── uninstall.go         # Uninstall
+│   │   ├── service.go           # System service management
+│   │   └── transparent.go       # Transparent proxy (iptables/pf)
+│   └── proxy/                   # Proxy implementation
+│       ├── server.go            # HTTP/HTTPS proxy server
+│       └── scanner.go           # API client for scanning
 ├── go.mod
 ├── Dockerfile
-└── docker-compose.yml
+├── docker-compose.yml
+└── install.sh                   # One-line installer
 ```
 
 ## Architecture
