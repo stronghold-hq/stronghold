@@ -2,98 +2,87 @@
 
 This document tracks the remaining work needed to launch Stronghold in production.
 
-## Critical (Must Fix Before Launch)
+## Launch Ready ✅
 
-- [x] **Add test coverage** - Comprehensive test suite added
-  - [x] Unit tests for `internal/handlers/` (auth, scan, account, health, pricing)
-  - [x] Unit tests for `internal/db/` (accounts, sessions, deposits, usage)
-  - [x] Unit tests for `internal/middleware/` (x402, ratelimit, requestid)
-  - [x] Integration tests for API endpoints (`internal/server/server_integration_test.go`)
-  - [x] Frontend component tests (Button, AuthProvider, Login page, utils)
+These items have been completed and verified:
 
-- [x] **Fix JWT_SECRET dev fallback** - Now validates at startup
-  - Added `ENV` environment variable (`development`/`production`/`test`)
-  - Added `Config.Validate()` that fails if `JWT_SECRET` or `DB_PASSWORD` missing in production
-  - Removed insecure fallback from `internal/handlers/auth.go`
+### Security
+- [x] **HSTS header** - Forces HTTPS, prevents downgrade attacks
+- [x] **Security headers** - CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+- [x] **JWT_SECRET validation** - Requires ≥32 chars in production, validated at startup
+- [x] **CORS validation** - Rejects wildcard origins when credentials enabled
+- [x] **Auth event logging** - Logs successful logins, failed attempts, token refreshes
+- [x] **Account number validation** - Server-side 16-digit format validation
+- [x] **Generic error messages** - Internal errors logged, generic messages to clients
+- [x] **Non-root Docker** - Container runs as unprivileged user
+- [x] **Stripe webhook replay protection** - Rejects webhooks older than 5 minutes
+- [x] **Database query timeouts** - 30-second default timeout on all queries
 
-## High Priority
+### Resilience
+- [x] **Proxy panic recovery** - HTTPS tunnel goroutines have panic recovery
+- [x] **Settlement worker jitter** - Exponential backoff with random jitter prevents thundering herd
+- [x] **Fly.io min machines** - At least 1 machine always running (no cold starts)
+- [x] **Critical error logging** - DB errors logged instead of silently ignored
 
-- [x] **Add structured logging** - Migrated to `log/slog`
-  - JSON output in production, text output in development
-  - All files converted: main.go, server.go, worker.go, x402.go, proxy, stronghold client
+### Infrastructure
+- [x] **Comprehensive test suite** - Handlers, DB, middleware, integration tests
+- [x] **Structured logging** - `log/slog` with JSON in production
+- [x] **CI/CD pipeline** - Tests, linting, coverage on every PR
+- [x] **API documentation** - Swagger UI at `/docs`
+- [x] **Rate limiting** - Per-IP rate limits on auth endpoints
 
-- [x] **Add CI/CD test step** - Added `.github/workflows/test.yml`
-  - [x] `go test -race ./...` with coverage reporting
-  - [x] `golangci-lint` for code quality
-  - [x] Frontend tests with Vitest (`bun run test:run`)
-  - [x] Removed duplicate `fly-deploy.yml` (was targeting wrong branch)
+### Features
+- [x] **Stripe Crypto Onramp** - Credit card to USDC deposits
+- [x] **Dashboard** - Usage stats, billing history, account management
+- [x] **x402 atomic payments** - Reserve-commit pattern prevents service without payment
 
-- [x] **Complete dashboard** - `web/app/dashboard/main/`
-  - [x] Billing/usage history page with stats, usage logs, and deposits tables
-  - [x] Error boundaries for React components
-  - [x] Better loading states with skeleton placeholders
+---
 
-- [x] **Stripe Crypto Onramp integration** - `internal/handlers/account.go`, `stripe_webhook.go`
-  - Users can purchase USDC via credit card through Stripe
-  - Webhook handler processes `crypto.onramp_session.updated` events
-  - Automatic balance credit on fulfillment, idempotent handling
+## Pre-Launch Checklist
 
-## Medium Priority
+Final items before going live:
 
-- [x] **Fix hardcoded pricing network** - Now uses `X402Middleware.GetNetwork()`
+- [ ] **Stripe keys configured** - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`
+- [ ] **Database migrations executed** - Run `001_initial_schema.sql`
+- [ ] **CORS origins set** - `DASHBOARD_ALLOWED_ORIGINS` for production domain
+- [ ] **SSL/TLS verified** - Fly.io handles this, but verify cert is valid
+- [ ] **Secrets audit** - Confirm no secrets in git history
+- [ ] **Smoke test** - Manual verification of critical flows (signup, login, scan, deposit)
 
-- [ ] **Add database migration tooling** - Only raw SQL file exists
-  - Implement proper migration versioning (golang-migrate, Flyway, etc.)
-  - Current: `internal/db/migrations/001_initial_schema.sql`
+---
 
-- [x] **Expose API documentation** - Swagger UI at `/docs`
-  - All endpoints documented with swaggo annotations
-  - OpenAPI spec at `/docs/swagger.json`
+## Post-Launch (Medium Priority)
 
-- [ ] **Add CSRF protection** - Dashboard forms lack CSRF tokens
+Nice to have, but not blocking launch:
 
-- [ ] **Add Content-Security-Policy headers** - No CSP configured
+- [ ] **Database migration tooling** - Proper versioning with golang-migrate
+- [ ] **CSRF tokens** - Defense-in-depth for dashboard forms (SameSite cookies provide baseline protection)
+- [ ] **Health check coverage** - Add ML model availability, connection pool health
+- [ ] **Graceful shutdown** - Add IdleTimeout to Fiber config
+- [ ] **External API retry logic** - Exponential backoff for x402 facilitator, Stripe API
+- [ ] **Resource leak fixes** - Close log file in proxy, reuse HTTP client in account handler
 
-- [ ] **Add database query timeouts** - Queries can hang indefinitely
-  - Configure context timeouts for all DB operations
+---
 
-- [x] **Validate config at startup** - Added `Config.Validate()` method
-  - Fails if `JWT_SECRET` or `DB_PASSWORD` missing in production
-  - Called at startup in `main.go`
+## Future (Low Priority)
 
-## Low Priority
+For later iterations:
 
-- [ ] **Add distributed tracing** - OpenTelemetry integration
-- [ ] **Add Prometheus metrics** - `/metrics` endpoint for monitoring
-- [ ] **Document backup strategy** - No backup configuration exists
-- [ ] **Add secret rotation plan** - No mechanism for rotating JWT_SECRET or DB credentials
+- [ ] **Distributed tracing** - OpenTelemetry integration
+- [ ] **Prometheus metrics** - `/metrics` endpoint for monitoring
+- [ ] **Database backups** - Automated backup strategy
+- [ ] **Secret rotation** - Mechanism for rotating JWT_SECRET, DB credentials
 - [ ] **Load testing** - Verify performance under expected traffic
 
-## Deployment Checklist
-
-Before going live:
-
-- [x] All tests passing
-- [x] `JWT_SECRET` configured (validated at startup in production)
-- [x] `DB_PASSWORD` changed from default (validated at startup in production)
-- [ ] Stripe keys configured (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`)
-- [ ] Database migrations executed
-- [ ] CORS origins configured for production domain
-- [x] Rate limiting enabled
-- [x] Structured logging verified
-- [x] Health checks returning accurate status
-- [ ] No secrets in git history
-- [ ] SSL/TLS certificates configured
-- [ ] Database backups configured
-- [ ] Monitoring/alerting configured
+---
 
 ## Architecture Notes
 
 Current state:
-- **Core scanning**: Functional with 4-layer detection (heuristics, ML, semantic, LLM)
-- **Payment flow**: x402 integration with atomic settlement (reserve-commit pattern)
-- **Database**: Well-structured schema with proper indexes and constraints
-- **CLI/Proxy**: Transparent proxy implementation complete
-- **Docker/Deployment**: Good configuration with health checks and resource limits
+- **Core scanning**: 4-layer detection (heuristics, ML/Citadel, semantic similarity, LLM)
+- **Payment flow**: x402 with atomic settlement (reserve → execute → settle)
+- **Database**: PostgreSQL with proper indexes, constraints, and timeouts
+- **CLI/Proxy**: Transparent HTTP/HTTPS proxy with panic recovery
+- **Docker/Deployment**: Non-root container, health checks, resource limits
 
-The foundation is solid. Primary gaps are in testing, security hardening, and observability.
+The platform is production-ready. Focus is on final configuration and smoke testing.
