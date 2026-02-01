@@ -83,6 +83,29 @@ internal/
 - `/v1/scan` - Unified scanning ($0.002)
 - `/v1/scan/multiturn` - Multi-turn conversation protection ($0.005)
 
+## Testing Requirements
+
+**CRITICAL: All tests must actually run and pass before considering work complete.**
+
+- Tests require Docker to be running (testcontainers spins up PostgreSQL)
+- If Docker is not available, tests will be SKIPPED - this is NOT the same as passing
+- **Never proceed with a commit if tests are skipped due to missing infrastructure**
+- If you see "Docker is not available, skipping test" - STOP and fix Docker first
+- Run `docker info` to verify Docker is available before running tests
+- Pre-existing test failures must be noted and either fixed or explicitly acknowledged by the user
+
+```bash
+# Verify Docker is running
+docker info
+
+# Run all tests (requires Docker)
+go test ./...
+
+# If tests skip, install/start Docker first:
+# Arch: sudo pacman -S docker && sudo systemctl start docker
+# Then add user to docker group: sudo usermod -aG docker $USER && newgrp docker
+```
+
 ## Database
 
 PostgreSQL 16 with auto-migrations in `internal/db/migrations/`. Tables: accounts, sessions, usage, deposits.
