@@ -46,9 +46,9 @@ This document tracks the remaining work needed to launch Stronghold in productio
   - Implement proper migration versioning (golang-migrate, Flyway, etc.)
   - Current: `internal/db/migrations/001_initial_schema.sql`
 
-- [ ] **Expose API documentation** - OpenAPI comments exist but no endpoint
-  - Add `/docs` endpoint with Swagger UI
-  - Generate OpenAPI JSON spec
+- [x] **Expose API documentation** - Swagger UI at `/docs`
+  - All endpoints documented with swaggo annotations
+  - OpenAPI spec at `/docs/swagger.json`
 
 - [ ] **Add CSRF protection** - Dashboard forms lack CSRF tokens
 
