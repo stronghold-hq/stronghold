@@ -5,7 +5,6 @@ import (
 	"stronghold/internal/stronghold"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 )
 
 // ScanHandler handles scan-related endpoints
@@ -81,23 +80,28 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/content [post]
 func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
+	requestID := middleware.GetRequestID(c)
+
 	var req ScanContentRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
+			"error":      "Invalid request body",
+			"request_id": requestID,
 		})
 	}
 
 	if req.Text == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Text is required",
+			"error":      "Text is required",
+			"request_id": requestID,
 		})
 	}
 
 	result, err := h.scanner.ScanContent(c.Context(), req.Text, req.SourceURL, req.SourceType, req.ContentType)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Scan failed: " + err.Error(),
+			"error":      "Scan failed: " + err.Error(),
+			"request_id": requestID,
 		})
 	}
 
@@ -110,7 +114,7 @@ func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
 	result.Metadata["content_type"] = req.ContentType
 	result.Metadata["file_path"] = req.FilePath
 
-	result.RequestID = uuid.New().String()
+	result.RequestID = requestID
 	h.x402.PaymentResponse(c, result.RequestID)
 
 	return c.JSON(result)
@@ -128,27 +132,32 @@ func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/output [post]
 func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
+	requestID := middleware.GetRequestID(c)
+
 	var req ScanOutputRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
+			"error":      "Invalid request body",
+			"request_id": requestID,
 		})
 	}
 
 	if req.Text == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Text is required",
+			"error":      "Text is required",
+			"request_id": requestID,
 		})
 	}
 
 	result, err := h.scanner.ScanOutput(c.Context(), req.Text)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Scan failed: " + err.Error(),
+			"error":      "Scan failed: " + err.Error(),
+			"request_id": requestID,
 		})
 	}
 
-	result.RequestID = uuid.New().String()
+	result.RequestID = requestID
 	h.x402.PaymentResponse(c, result.RequestID)
 
 	return c.JSON(result)
@@ -166,16 +175,20 @@ func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan [post]
 func (h *ScanHandler) ScanUnified(c fiber.Ctx) error {
+	requestID := middleware.GetRequestID(c)
+
 	var req ScanUnifiedRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
+			"error":      "Invalid request body",
+			"request_id": requestID,
 		})
 	}
 
 	if req.Text == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Text is required",
+			"error":      "Text is required",
+			"request_id": requestID,
 		})
 	}
 
@@ -186,18 +199,20 @@ func (h *ScanHandler) ScanUnified(c fiber.Ctx) error {
 
 	if mode != "input" && mode != "output" && mode != "both" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid mode. Must be 'input', 'output', or 'both'",
+			"error":      "Invalid mode. Must be 'input', 'output', or 'both'",
+			"request_id": requestID,
 		})
 	}
 
 	result, err := h.scanner.ScanUnified(c.Context(), req.Text, mode)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Scan failed: " + err.Error(),
+			"error":      "Scan failed: " + err.Error(),
+			"request_id": requestID,
 		})
 	}
 
-	result.RequestID = uuid.New().String()
+	result.RequestID = requestID
 	h.x402.PaymentResponse(c, result.RequestID)
 
 	return c.JSON(result)
@@ -215,33 +230,39 @@ func (h *ScanHandler) ScanUnified(c fiber.Ctx) error {
 // @Failure 402 {object} map[string]interface{}
 // @Router /v1/scan/multiturn [post]
 func (h *ScanHandler) ScanMultiturn(c fiber.Ctx) error {
+	requestID := middleware.GetRequestID(c)
+
 	var req ScanMultiturnRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
+			"error":      "Invalid request body",
+			"request_id": requestID,
 		})
 	}
 
 	if req.SessionID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Session ID is required",
+			"error":      "Session ID is required",
+			"request_id": requestID,
 		})
 	}
 
 	if len(req.Turns) == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "At least one turn is required",
+			"error":      "At least one turn is required",
+			"request_id": requestID,
 		})
 	}
 
 	result, err := h.scanner.ScanMultiturn(c.Context(), req.SessionID, req.Turns)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Scan failed: " + err.Error(),
+			"error":      "Scan failed: " + err.Error(),
+			"request_id": requestID,
 		})
 	}
 
-	result.RequestID = uuid.New().String()
+	result.RequestID = requestID
 	h.x402.PaymentResponse(c, result.RequestID)
 
 	return c.JSON(result)
