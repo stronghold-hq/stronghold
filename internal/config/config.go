@@ -12,6 +12,7 @@ type Config struct {
 	Server     ServerConfig
 	Database   DatabaseConfig
 	Auth       AuthConfig
+	Cookie     CookieConfig
 	Dashboard  DashboardConfig
 	X402       X402Config
 	Stronghold StrongholdConfig
@@ -40,6 +41,13 @@ type AuthConfig struct {
 	JWTSecret       string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+}
+
+// CookieConfig holds httpOnly cookie configuration
+type CookieConfig struct {
+	Domain   string
+	Secure   bool
+	SameSite string
 }
 
 // DashboardConfig holds dashboard configuration
@@ -94,6 +102,11 @@ func Load() *Config {
 			JWTSecret:       getEnv("JWT_SECRET", ""),
 			AccessTokenTTL:  getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
 			RefreshTokenTTL: getDuration("REFRESH_TOKEN_TTL", 90*24*time.Hour),
+		},
+		Cookie: CookieConfig{
+			Domain:   getEnv("COOKIE_DOMAIN", ""),
+			Secure:   getBool("COOKIE_SECURE", true),
+			SameSite: getEnv("COOKIE_SAMESITE", "Strict"),
 		},
 		Dashboard: DashboardConfig{
 			URL:            getEnv("DASHBOARD_URL", "http://localhost:3000"),

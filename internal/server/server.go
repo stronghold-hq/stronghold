@@ -55,6 +55,11 @@ func New(cfg *config.Config) (*Server, error) {
 		RefreshTokenTTL: cfg.Auth.RefreshTokenTTL,
 		DashboardURL:    cfg.Dashboard.URL,
 		AllowedOrigins:  cfg.Dashboard.AllowedOrigins,
+		Cookie: handlers.CookieConfig{
+			Domain:   cfg.Cookie.Domain,
+			Secure:   cfg.Cookie.Secure,
+			SameSite: cfg.Cookie.SameSite,
+		},
 	}
 	authHandler := handlers.NewAuthHandler(database, authConfig)
 
@@ -141,6 +146,11 @@ func (s *Server) setupRoutes() {
 		RefreshTokenTTL: s.config.Auth.RefreshTokenTTL,
 		DashboardURL:    s.config.Dashboard.URL,
 		AllowedOrigins:  s.config.Dashboard.AllowedOrigins,
+		Cookie: handlers.CookieConfig{
+			Domain:   s.config.Cookie.Domain,
+			Secure:   s.config.Cookie.Secure,
+			SameSite: s.config.Cookie.SameSite,
+		},
 	})
 	accountHandler.RegisterRoutes(s.app, s.authHandler)
 
