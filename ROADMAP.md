@@ -30,7 +30,7 @@ This document tracks the remaining work needed to launch Stronghold in productio
 
 - [ ] **Add structured logging** - Currently using basic `log` package
   - Switch to `log/slog` or `zap` with JSON output
-  - Add request ID to all log entries
+  - ~~Add request ID to all log entries~~ (done - request IDs now included in logs)
   - Resolve TODO at `internal/handlers/auth.go:196`
 
 - [ ] **Fix health endpoint** - `internal/handlers/health.go:73` returns hardcoded "up"
@@ -50,7 +50,7 @@ This document tracks the remaining work needed to launch Stronghold in productio
   - [ ] Error boundaries for React components
   - [ ] Better loading states
 
-- [ ] **Add request ID tracking** - Missing distributed tracing
+- [x] **Add request ID tracking** - Missing distributed tracing
   - Generate UUID per request
   - Include in all log entries and error responses
 

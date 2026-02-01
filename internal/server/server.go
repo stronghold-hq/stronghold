@@ -91,17 +91,20 @@ func (s *Server) setupMiddleware() {
 	// Recovery middleware
 	s.app.Use(recover.New())
 
-	// Logger middleware
+	// Request ID middleware - must be early to ensure ID is available for logging
+	s.app.Use(middleware.RequestID())
+
+	// Logger middleware - includes request ID
 	s.app.Use(logger.New(logger.Config{
-		Format: "[${time}] ${status} - ${method} ${path} ${latency}\n",
+		Format: "[${time}] ${status} - ${method} ${path} ${latency} [${locals:request_id}]\n",
 	}))
 
-	// CORS middleware - configured for dashboard and x402 headers
+	// CORS middleware - configured for dashboard, x402 headers, and request tracking
 	s.app.Use(cors.New(cors.Config{
 		AllowOrigins:     s.config.Dashboard.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization"},
-		ExposeHeaders:    []string{"X-PAYMENT-RESPONSE"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization", middleware.RequestIDHeader},
+		ExposeHeaders:    []string{"X-PAYMENT-RESPONSE", middleware.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -151,9 +154,10 @@ func (s *Server) setupRoutes() {
 	// 404 handler
 	s.app.Use(func(c fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error":   "Not found",
-			"message": "The requested endpoint does not exist",
-			"path":    c.Path(),
+			"error":      "Not found",
+			"message":    "The requested endpoint does not exist",
+			"path":       c.Path(),
+			"request_id": middleware.GetRequestID(c),
 		})
 	})
 }
@@ -193,14 +197,16 @@ func errorHandler(c fiber.Ctx, err error) error {
 		message = e.Message
 	}
 
-	// Log the error
-	log.Printf("Error: %v", err)
+	requestID := middleware.GetRequestID(c)
+
+	// Log the error with request ID
+	log.Printf("[%s] Error: %v", requestID, err)
 
 	// Return JSON response
 	return c.Status(code).JSON(fiber.Map{
-		"error":     message,
-		"status":    code,
-		"timestamp": time.Now().Unix(),
-		"request_id": c.Locals("request_id"),
+		"error":      message,
+		"status":     code,
+		"timestamp":  time.Now().Unix(),
+		"request_id": requestID,
 	})
 }
