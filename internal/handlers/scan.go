@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"log/slog"
+
 	"stronghold/internal/db"
 	"stronghold/internal/middleware"
 	"stronghold/internal/stronghold"
@@ -121,8 +123,9 @@ func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
 
 	result, err := h.scanner.ScanContent(c.Context(), req.Text, req.SourceURL, req.SourceType, req.ContentType)
 	if err != nil {
+		slog.Error("scan content failed", "request_id", requestID, "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":      "Scan failed: " + err.Error(),
+			"error":      "Scan failed",
 			"request_id": requestID,
 		})
 	}
@@ -177,8 +180,9 @@ func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
 
 	result, err := h.scanner.ScanOutput(c.Context(), req.Text)
 	if err != nil {
+		slog.Error("scan output failed", "request_id", requestID, "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":      "Scan failed: " + err.Error(),
+			"error":      "Scan failed",
 			"request_id": requestID,
 		})
 	}
@@ -236,8 +240,9 @@ func (h *ScanHandler) ScanUnified(c fiber.Ctx) error {
 
 	result, err := h.scanner.ScanUnified(c.Context(), req.Text, mode)
 	if err != nil {
+		slog.Error("scan unified failed", "request_id", requestID, "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":      "Scan failed: " + err.Error(),
+			"error":      "Scan failed",
 			"request_id": requestID,
 		})
 	}
@@ -290,8 +295,9 @@ func (h *ScanHandler) ScanMultiturn(c fiber.Ctx) error {
 
 	result, err := h.scanner.ScanMultiturn(c.Context(), req.SessionID, req.Turns)
 	if err != nil {
+		slog.Error("scan multiturn failed", "request_id", requestID, "session_id", req.SessionID, "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":      "Scan failed: " + err.Error(),
+			"error":      "Scan failed",
 			"request_id": requestID,
 		})
 	}
@@ -333,6 +339,10 @@ func (h *ScanHandler) recordExecutionResult(c fiber.Ctx, result *stronghold.Scan
 	if err := h.db.RecordExecution(c.Context(), tx.ID, resultMap); err != nil {
 		// Log but don't fail - the result was already computed
 		// The middleware will still attempt settlement
-		_ = err
+		slog.Error("failed to record execution result",
+			"payment_id", tx.ID,
+			"request_id", result.RequestID,
+			"error", err,
+		)
 	}
 }

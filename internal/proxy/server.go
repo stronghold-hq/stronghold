@@ -386,11 +386,26 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Bidirectional copy
+	// Bidirectional copy with panic recovery and error logging
 	go func() {
-		io.Copy(destConn, clientConn)
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("panic in HTTPS tunnel goroutine (client->dest)", "panic", r)
+			}
+		}()
+		if _, err := io.Copy(destConn, clientConn); err != nil {
+			s.logger.Debug("HTTPS tunnel copy error (client->dest)", "error", err)
+		}
 	}()
-	io.Copy(clientConn, destConn)
+
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic in HTTPS tunnel (dest->client)", "panic", r)
+		}
+	}()
+	if _, err := io.Copy(clientConn, destConn); err != nil {
+		s.logger.Debug("HTTPS tunnel copy error (dest->client)", "error", err)
+	}
 }
 
 // scanResponse scans the response content

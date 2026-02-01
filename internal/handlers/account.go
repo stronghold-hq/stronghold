@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -368,7 +369,11 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		// Update deposit with session ID
 		if err := h.db.UpdateDepositProviderTransaction(ctx, deposit.ID, session.ID); err != nil {
 			// Log but don't fail - the session was created successfully
-			_ = err
+			slog.Error("failed to update deposit with provider transaction ID",
+				"deposit_id", deposit.ID,
+				"session_id", session.ID,
+				"error", err,
+			)
 		}
 
 		resp.ClientSecret = &session.ClientSecret

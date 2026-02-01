@@ -19,6 +19,9 @@ func SecurityHeaders() fiber.Handler {
 		"form-action 'self'"
 
 	return func(c fiber.Ctx) error {
+		// HTTP Strict Transport Security - force HTTPS, prevent downgrade attacks
+		c.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
 		// Content Security Policy - controls which resources can be loaded
 		c.Set("Content-Security-Policy", csp)
 

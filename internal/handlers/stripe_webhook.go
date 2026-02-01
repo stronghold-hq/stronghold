@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log/slog"
+	"time"
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
@@ -10,6 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
+
+// webhookTimestampTolerance is the maximum age of a webhook before it's rejected
+// to prevent replay attacks
+const webhookTimestampTolerance = 5 * time.Minute
 
 // StripeWebhookHandler handles Stripe webhook events
 type StripeWebhookHandler struct {
@@ -43,6 +48,19 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		slog.Warn("stripe webhook signature verification failed", "error", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid signature",
+		})
+	}
+
+	// Validate webhook timestamp to prevent replay attacks
+	eventTime := time.Unix(event.Created, 0)
+	if time.Since(eventTime) > webhookTimestampTolerance {
+		slog.Warn("stripe webhook rejected: timestamp too old",
+			"event_id", event.ID,
+			"event_time", eventTime,
+			"age", time.Since(eventTime),
+		)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Webhook timestamp too old",
 		})
 	}
 

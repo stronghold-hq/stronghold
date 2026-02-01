@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
+
+// accountNumberRegex validates 16-digit numeric account numbers
+var accountNumberRegex = regexp.MustCompile(`^\d{16}$`)
 
 // CookieConfig holds httpOnly cookie configuration
 type CookieConfig struct {
@@ -264,11 +269,28 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		})
 	}
 
+	// Validate account number format (16 digits)
+	if !accountNumberRegex.MatchString(req.AccountNumber) {
+		slog.Warn("login attempt with invalid account number format",
+			"ip", c.IP(),
+			"user_agent", string(c.Request().Header.UserAgent()),
+		)
+		// Use constant time to prevent timing attacks
+		time.Sleep(100 * time.Millisecond)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid account number",
+		})
+	}
+
 	ctx := c.Context()
 
 	// Get account by account number
 	account, err := h.db.GetAccountByNumber(ctx, req.AccountNumber)
 	if err != nil {
+		slog.Warn("login failed: account not found",
+			"ip", c.IP(),
+			"user_agent", string(c.Request().Header.UserAgent()),
+		)
 		// Use constant time comparison to prevent timing attacks
 		time.Sleep(100 * time.Millisecond)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -285,9 +307,15 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 
 	// Update last login
 	if err := h.db.UpdateLastLogin(ctx, account.ID); err != nil {
-		// Log but don't fail
-		// TODO: Add proper logging
+		slog.Error("failed to update last login", "account_id", account.ID, "error", err)
 	}
+
+	// Log successful login
+	slog.Info("login successful",
+		"account_id", account.ID,
+		"ip", c.IP(),
+		"user_agent", string(c.Request().Header.UserAgent()),
+	)
 
 	// Create session
 	ip := c.IP()
@@ -350,12 +378,21 @@ func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 	// Rotate refresh token
 	session, newRefreshToken, err := h.db.RotateRefreshToken(ctx, refreshToken, h.config.RefreshTokenTTL)
 	if err != nil {
+		slog.Warn("token refresh failed: invalid or expired refresh token",
+			"ip", c.IP(),
+			"user_agent", string(c.Request().Header.UserAgent()),
+		)
 		// Clear invalid cookies
 		h.clearAuthCookies(c)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired refresh token",
 		})
 	}
+
+	slog.Info("token refresh successful",
+		"account_id", session.AccountID,
+		"ip", c.IP(),
+	)
 
 	// Get account
 	account, err := h.db.GetAccountByID(ctx, session.AccountID)

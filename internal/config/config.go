@@ -246,6 +246,8 @@ func (c *Config) Validate() error {
 		if c.Environment == EnvProduction {
 			errs = append(errs, "JWT_SECRET is required in production")
 		}
+	} else if c.Environment == EnvProduction && len(c.Auth.JWTSecret) < 32 {
+		errs = append(errs, "JWT_SECRET must be at least 32 characters in production")
 	}
 
 	// Database password should be set in production
@@ -265,6 +267,15 @@ func (c *Config) Validate() error {
 		}
 		if c.Stripe.PublishableKey == "" {
 			errs = append(errs, "STRIPE_PUBLISHABLE_KEY is required in production")
+		}
+	}
+
+	// CORS validation: wildcard origins are insecure when credentials are allowed
+	// The server uses AllowCredentials: true, so wildcards must be rejected
+	for _, origin := range c.Dashboard.AllowedOrigins {
+		if origin == "*" {
+			errs = append(errs, "DASHBOARD_ALLOWED_ORIGINS cannot contain wildcard '*' (credentials are enabled)")
+			break
 		}
 	}
 

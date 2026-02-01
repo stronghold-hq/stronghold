@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -196,7 +197,8 @@ func (w *Worker) expireStaleReservations(ctx context.Context) {
 }
 
 // calculateBackoff returns the backoff duration for a given attempt number
-// Uses exponential backoff: 5s, 10s, 20s, 40s, 80s
+// Uses exponential backoff with jitter to prevent thundering herd:
+// Base delays: 5s, 10s, 20s, 40s, 80s + random jitter up to 50% of delay
 func (w *Worker) calculateBackoff(attempts int) time.Duration {
 	baseDelay := 5 * time.Second
 	maxDelay := 5 * time.Minute
@@ -210,7 +212,9 @@ func (w *Worker) calculateBackoff(attempts int) time.Duration {
 		}
 	}
 
-	return delay
+	// Add random jitter: 0 to 50% of the delay
+	jitter := time.Duration(rand.Int63n(int64(delay / 2)))
+	return delay + jitter
 }
 
 // settlePayment attempts to settle a payment with the facilitator

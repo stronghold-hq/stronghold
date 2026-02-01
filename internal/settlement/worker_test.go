@@ -14,19 +14,21 @@ import (
 func TestWorker_ExponentialBackoff(t *testing.T) {
 	w := &Worker{}
 
+	// Backoff formula: base * 2^attempts + jitter (0 to 50% of delay)
+	// So max is 1.5x the base delay
 	testCases := []struct {
 		attempts     int
 		expectedMin  time.Duration
-		expectedMax  time.Duration
+		expectedMax  time.Duration // Base + 50% jitter
 	}{
-		{0, 5 * time.Second, 5 * time.Second},        // First attempt: 5s
-		{1, 10 * time.Second, 10 * time.Second},      // Second attempt: 10s
-		{2, 20 * time.Second, 20 * time.Second},      // Third attempt: 20s
-		{3, 40 * time.Second, 40 * time.Second},      // Fourth attempt: 40s
-		{4, 80 * time.Second, 80 * time.Second},      // Fifth attempt: 80s
-		{5, 160 * time.Second, 160 * time.Second},    // Sixth attempt: 160s
-		{6, 5 * time.Minute, 5 * time.Minute},        // Capped at 5 minutes
-		{10, 5 * time.Minute, 5 * time.Minute},       // Still capped
+		{0, 5 * time.Second, 5*time.Second + 5*time.Second/2},        // 5s base + up to 2.5s jitter
+		{1, 10 * time.Second, 10*time.Second + 10*time.Second/2},     // 10s base + up to 5s jitter
+		{2, 20 * time.Second, 20*time.Second + 20*time.Second/2},     // 20s base + up to 10s jitter
+		{3, 40 * time.Second, 40*time.Second + 40*time.Second/2},     // 40s base + up to 20s jitter
+		{4, 80 * time.Second, 80*time.Second + 80*time.Second/2},     // 80s base + up to 40s jitter
+		{5, 160 * time.Second, 160*time.Second + 160*time.Second/2},  // 160s base + up to 80s jitter
+		{6, 5 * time.Minute, 5*time.Minute + 5*time.Minute/2},        // Capped at 5 minutes + up to 2.5 min jitter
+		{10, 5 * time.Minute, 5*time.Minute + 5*time.Minute/2},       // Still capped
 	}
 
 	for _, tc := range testCases {
@@ -178,19 +180,27 @@ func TestWorker_ExpiresStaleReservations_Integration(t *testing.T) {
 func TestWorker_BackoffTiming(t *testing.T) {
 	w := &Worker{}
 
-	// Test the progression of backoff times
-	backoffs := []time.Duration{}
-	for i := 0; i < 10; i++ {
-		backoffs = append(backoffs, w.calculateBackoff(i))
+	// Test that backoff generally increases with attempts (accounting for jitter)
+	// Base delays: 5s, 10s, 20s, 40s, 80s, 160s, 300s (cap)
+	baseDelays := []time.Duration{
+		5 * time.Second,
+		10 * time.Second,
+		20 * time.Second,
+		40 * time.Second,
+		80 * time.Second,
+		160 * time.Second,
+		5 * time.Minute, // cap
 	}
 
-	// Verify each backoff is double the previous (until cap)
-	for i := 1; i < len(backoffs); i++ {
-		expected := backoffs[i-1] * 2
-		if expected > 5*time.Minute {
-			expected = 5 * time.Minute
-		}
-		assert.Equal(t, expected, backoffs[i], "Backoff at attempt %d should be correct", i)
+	for i := 0; i < len(baseDelays); i++ {
+		backoff := w.calculateBackoff(i)
+		// Backoff should be at least the base delay
+		assert.GreaterOrEqual(t, backoff, baseDelays[i],
+			"Backoff at attempt %d should be at least %v", i, baseDelays[i])
+		// Backoff should be at most base + 50% jitter
+		maxExpected := baseDelays[i] + baseDelays[i]/2
+		assert.LessOrEqual(t, backoff, maxExpected,
+			"Backoff at attempt %d should be at most %v", i, maxExpected)
 	}
 }
 
@@ -290,10 +300,11 @@ func TestWorker_RunExpirationLoop_ExitsOnStop(t *testing.T) {
 func TestWorker_CalculateBackoff_MaxCap(t *testing.T) {
 	w := &Worker{}
 
-	// Even with very high attempt counts, should never exceed 5 minutes
+	// Even with very high attempt counts, should never exceed 5 minutes + 50% jitter (7.5 minutes)
+	maxWithJitter := 5*time.Minute + 5*time.Minute/2
 	for attempts := 0; attempts < 100; attempts++ {
 		backoff := w.calculateBackoff(attempts)
-		assert.LessOrEqual(t, backoff, 5*time.Minute,
-			"Backoff should never exceed 5 minutes, got %v for attempt %d", backoff, attempts)
+		assert.LessOrEqual(t, backoff, maxWithJitter,
+			"Backoff should never exceed 7.5 minutes (5 min + 50%% jitter), got %v for attempt %d", backoff, attempts)
 	}
 }

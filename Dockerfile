@@ -27,6 +27,10 @@ WORKDIR /app
 # Install ca-certificates for HTTPS
 RUN apk --no-cache add ca-certificates
 
+# Create non-root user for security
+RUN addgroup -g 1000 stronghold && \
+    adduser -u 1000 -G stronghold -s /bin/sh -D stronghold
+
 # Copy binary from builder
 COPY --from=builder /app/stronghold-api .
 
@@ -38,6 +42,9 @@ COPY --from=builder /app/docs ./docs
 
 # Expose port
 EXPOSE 8080
+
+# Switch to non-root user
+USER stronghold
 
 # Run the binary
 CMD ["./stronghold-api"]
