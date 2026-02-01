@@ -18,7 +18,7 @@ This document tracks the remaining work needed to launch Stronghold in productio
   - Protect `/v1/auth/login` from brute force
   - Add Fiber limiter middleware to sensitive endpoints
 
-- [ ] **Move tokens to httpOnly cookies** - `web/components/providers/AuthProvider.tsx:118` stores tokens in localStorage
+- [x] **Move tokens to httpOnly cookies** - `web/components/providers/AuthProvider.tsx:118` stores tokens in localStorage
   - Vulnerable to XSS attacks
   - Implement secure cookie-based auth flow
 

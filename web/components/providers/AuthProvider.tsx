@@ -14,12 +14,6 @@ interface Account {
   last_login_at?: string;
 }
 
-interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: string;
-}
-
 interface AuthContextType {
   account: Account | null;
   isLoading: boolean;
@@ -27,8 +21,7 @@ interface AuthContextType {
   login: (accountNumber: string) => Promise<void>;
   createAccount: (walletAddress?: string) => Promise<{ accountNumber: string; recoveryFile: string }>;
   logout: () => Promise<void>;
-  refreshAccessToken: () => Promise<boolean>;
-  getAccessToken: () => string | null;
+  refreshAuth: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,58 +29,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [account, setAccount] = useState<Account | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [tokens, setTokens] = useState<AuthTokens | null>(null);
 
-  // Load tokens from localStorage on mount
+  // Check auth status on mount by fetching account info
   useEffect(() => {
-    const storedTokens = localStorage.getItem('stronghold_tokens');
-    if (storedTokens) {
-      try {
-        const parsed = JSON.parse(storedTokens);
-        setTokens(parsed);
-      } catch {
-        localStorage.removeItem('stronghold_tokens');
-      }
-    }
-    setIsLoading(false);
+    checkAuth();
   }, []);
 
-  // Fetch account info when we have tokens
-  useEffect(() => {
-    if (tokens?.accessToken) {
-      fetchAccount();
-    }
-  }, [tokens?.accessToken]);
-
-  const fetchAccount = async () => {
-    if (!tokens?.accessToken) return;
-
+  const checkAuth = async () => {
     try {
       const response = await fetch(`${API_URL}/v1/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${tokens.accessToken}`,
-        },
+        credentials: 'include', // Send httpOnly cookies
       });
 
-      if (response.status === 401) {
-        // Token expired, try to refresh
-        const refreshed = await refreshAccessToken();
-        if (!refreshed) {
-          logout();
-          return;
+      if (response.ok) {
+        const data = await response.json();
+        setAccount(data);
+      } else if (response.status === 401) {
+        // Try to refresh the token
+        const refreshed = await refreshAuth();
+        if (refreshed) {
+          // Retry fetching account after refresh
+          const retryResponse = await fetch(`${API_URL}/v1/auth/me`, {
+            credentials: 'include',
+          });
+          if (retryResponse.ok) {
+            const data = await retryResponse.json();
+            setAccount(data);
+          }
         }
-        // Retry with new token
-        return fetchAccount();
       }
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch account');
-      }
-
-      const data = await response.json();
-      setAccount(data);
     } catch (error) {
-      console.error('Error fetching account:', error);
+      console.error('Error checking auth:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -99,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include', // Receive and store httpOnly cookies
         body: JSON.stringify({ account_number: accountNumber }),
       });
 
@@ -107,18 +82,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(error.error || 'Login failed');
       }
 
-      const data = await response.json();
-      const newTokens: AuthTokens = {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token,
-        expiresAt: data.expires_at,
-      };
-
-      setTokens(newTokens);
-      localStorage.setItem('stronghold_tokens', JSON.stringify(newTokens));
-
-      // Fetch account info
-      await fetchAccount();
+      // Fetch account info after successful login
+      await checkAuth();
     } finally {
       setIsLoading(false);
     }
@@ -137,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include', // Receive and store httpOnly cookies
         body: JSON.stringify(body),
       });
 
@@ -146,14 +112,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const data = await response.json();
-      const newTokens: AuthTokens = {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token,
-        expiresAt: data.expires_at,
-      };
 
-      setTokens(newTokens);
-      localStorage.setItem('stronghold_tokens', JSON.stringify(newTokens));
+      // Fetch account info after successful creation
+      await checkAuth();
 
       return {
         accountNumber: data.account_number,
@@ -165,57 +126,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    if (tokens?.accessToken) {
-      try {
-        await fetch(`${API_URL}/v1/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${tokens.accessToken}`,
-          },
-        });
-      } catch (error) {
-        console.error('Error during logout:', error);
-      }
+    try {
+      await fetch(`${API_URL}/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include', // Send cookies for auth, server will clear them
+      });
+    } catch (error) {
+      console.error('Error during logout:', error);
     }
 
-    setTokens(null);
     setAccount(null);
-    localStorage.removeItem('stronghold_tokens');
   };
 
-  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
-    if (!tokens?.refreshToken) return false;
-
+  const refreshAuth = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetch(`${API_URL}/v1/auth/refresh`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+        credentials: 'include', // Send refresh token cookie, receive new cookies
       });
 
-      if (!response.ok) {
-        return false;
-      }
-
-      const data = await response.json();
-      const newTokens: AuthTokens = {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token,
-        expiresAt: data.expires_at,
-      };
-
-      setTokens(newTokens);
-      localStorage.setItem('stronghold_tokens', JSON.stringify(newTokens));
-      return true;
+      return response.ok;
     } catch (error) {
-      console.error('Error refreshing token:', error);
+      console.error('Error refreshing auth:', error);
       return false;
     }
-  }, [tokens?.refreshToken]);
-
-  const getAccessToken = () => tokens?.accessToken || null;
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -226,8 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         createAccount,
         logout,
-        refreshAccessToken,
-        getAccessToken,
+        refreshAuth,
       }}
     >
       {children}

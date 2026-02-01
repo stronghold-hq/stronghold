@@ -16,7 +16,7 @@ import { formatUSDC, truncateAddress, copyToClipboard } from '@/lib/utils';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export default function DepositPage() {
-  const { account, getAccessToken } = useAuth();
+  const { account } = useAuth();
   const [amount, setAmount] = useState('');
   const [provider, setProvider] = useState<'stripe' | 'direct'>('stripe');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,13 +51,12 @@ export default function DepositPage() {
 
     setIsSubmitting(true);
     try {
-      const token = getAccessToken();
       const response = await fetch(`${API_URL}/v1/account/deposit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
+        credentials: 'include',
         body: JSON.stringify({
           amount_usdc: amountNum,
           provider: provider,

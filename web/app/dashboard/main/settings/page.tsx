@@ -17,7 +17,7 @@ import { truncateAddress, copyToClipboard } from '@/lib/utils';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export default function SettingsPage() {
-  const { account, getAccessToken, logout } = useAuth();
+  const { account, logout } = useAuth();
   const [walletAddress, setWalletAddress] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -46,13 +46,12 @@ export default function SettingsPage() {
 
     setIsSubmitting(true);
     try {
-      const token = getAccessToken();
       const response = await fetch(`${API_URL}/v1/account/wallet`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
+        credentials: 'include',
         body: JSON.stringify({
           wallet_address: walletAddress,
         }),

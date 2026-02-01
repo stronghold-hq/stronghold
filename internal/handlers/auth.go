@@ -14,13 +14,21 @@ import (
 	"github.com/google/uuid"
 )
 
+// CookieConfig holds httpOnly cookie configuration
+type CookieConfig struct {
+	Domain   string
+	Secure   bool
+	SameSite string
+}
+
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	JWTSecret        string
-	AccessTokenTTL   time.Duration
-	RefreshTokenTTL  time.Duration
-	DashboardURL     string
-	AllowedOrigins   []string
+	JWTSecret       string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	DashboardURL    string
+	AllowedOrigins  []string
+	Cookie          CookieConfig
 }
 
 // LoadAuthConfig loads auth configuration from environment
@@ -46,11 +54,85 @@ type AuthHandler struct {
 	config *AuthConfig
 }
 
+// Cookie names
+const (
+	AccessTokenCookie  = "stronghold_access"
+	RefreshTokenCookie = "stronghold_refresh"
+)
+
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler(database *db.DB, config *AuthConfig) *AuthHandler {
 	return &AuthHandler{
 		db:     database,
 		config: config,
+	}
+}
+
+// setAuthCookies sets httpOnly cookies for access and refresh tokens
+func (h *AuthHandler) setAuthCookies(c fiber.Ctx, accessToken, refreshToken string, accessExpiry, refreshExpiry time.Time) {
+	sameSite := h.parseSameSite()
+
+	// Set access token cookie
+	c.Cookie(&fiber.Cookie{
+		Name:     AccessTokenCookie,
+		Value:    accessToken,
+		Expires:  accessExpiry,
+		HTTPOnly: true,
+		Secure:   h.config.Cookie.Secure,
+		SameSite: sameSite,
+		Path:     "/",
+		Domain:   h.config.Cookie.Domain,
+	})
+
+	// Set refresh token cookie
+	c.Cookie(&fiber.Cookie{
+		Name:     RefreshTokenCookie,
+		Value:    refreshToken,
+		Expires:  refreshExpiry,
+		HTTPOnly: true,
+		Secure:   h.config.Cookie.Secure,
+		SameSite: sameSite,
+		Path:     "/v1/auth", // Restrict refresh token to auth endpoints
+		Domain:   h.config.Cookie.Domain,
+	})
+}
+
+// clearAuthCookies clears the auth cookies
+func (h *AuthHandler) clearAuthCookies(c fiber.Ctx) {
+	sameSite := h.parseSameSite()
+
+	c.Cookie(&fiber.Cookie{
+		Name:     AccessTokenCookie,
+		Value:    "",
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HTTPOnly: true,
+		Secure:   h.config.Cookie.Secure,
+		SameSite: sameSite,
+		Path:     "/",
+		Domain:   h.config.Cookie.Domain,
+	})
+
+	c.Cookie(&fiber.Cookie{
+		Name:     RefreshTokenCookie,
+		Value:    "",
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HTTPOnly: true,
+		Secure:   h.config.Cookie.Secure,
+		SameSite: sameSite,
+		Path:     "/v1/auth",
+		Domain:   h.config.Cookie.Domain,
+	})
+}
+
+// parseSameSite converts string config to fiber SameSite constant
+func (h *AuthHandler) parseSameSite() string {
+	switch strings.ToLower(h.config.Cookie.SameSite) {
+	case "lax":
+		return "Lax"
+	case "none":
+		return "None"
+	default:
+		return "Strict"
 	}
 }
 
@@ -81,8 +163,6 @@ type CreateAccountRequest struct {
 // CreateAccountResponse represents the response after creating an account
 type CreateAccountResponse struct {
 	AccountNumber string    `json:"account_number"`
-	AccessToken   string    `json:"access_token"`
-	RefreshToken  string    `json:"refresh_token"`
 	ExpiresAt     time.Time `json:"expires_at"`
 	RecoveryFile  string    `json:"recovery_file"`
 }
@@ -134,10 +214,12 @@ func (h *AuthHandler) CreateAccount(c fiber.Ctx) error {
 	// Generate recovery file content
 	recoveryFile := generateRecoveryFile(account.AccountNumber, account.ID.String())
 
+	// Set httpOnly cookies
+	refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
+	h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
+
 	return c.Status(fiber.StatusCreated).JSON(CreateAccountResponse{
 		AccountNumber: account.AccountNumber,
-		AccessToken:   accessToken,
-		RefreshToken:  refreshToken,
 		ExpiresAt:     expiresAt,
 		RecoveryFile:  recoveryFile,
 	})
@@ -151,8 +233,6 @@ type LoginRequest struct {
 // LoginResponse represents the login response
 type LoginResponse struct {
 	AccountNumber string    `json:"account_number"`
-	AccessToken   string    `json:"access_token"`
-	RefreshToken  string    `json:"refresh_token"`
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 
@@ -214,10 +294,12 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		})
 	}
 
+	// Set httpOnly cookies
+	refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
+	h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
+
 	return c.JSON(LoginResponse{
 		AccountNumber: account.AccountNumber,
-		AccessToken:   accessToken,
-		RefreshToken:  refreshToken,
 		ExpiresAt:     expiresAt,
 	})
 }
@@ -229,22 +311,15 @@ type RefreshTokenRequest struct {
 
 // RefreshTokenResponse represents the token refresh response
 type RefreshTokenResponse struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // RefreshToken refreshes an access token using a refresh token
 func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
-	var req RefreshTokenRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	if req.RefreshToken == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+	// Read refresh token from httpOnly cookie
+	refreshToken := c.Cookies(RefreshTokenCookie)
+	if refreshToken == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Refresh token is required",
 		})
 	}
@@ -252,8 +327,10 @@ func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Rotate refresh token
-	session, newRefreshToken, err := h.db.RotateRefreshToken(ctx, req.RefreshToken, h.config.RefreshTokenTTL)
+	session, newRefreshToken, err := h.db.RotateRefreshToken(ctx, refreshToken, h.config.RefreshTokenTTL)
 	if err != nil {
+		// Clear invalid cookies
+		h.clearAuthCookies(c)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired refresh token",
 		})
@@ -282,10 +359,12 @@ func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 		})
 	}
 
+	// Set new httpOnly cookies
+	refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
+	h.setAuthCookies(c, accessToken, newRefreshToken, expiresAt, refreshExpiry)
+
 	return c.JSON(RefreshTokenResponse{
-		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
-		ExpiresAt:    expiresAt,
+		ExpiresAt: expiresAt,
 	})
 }
 
@@ -315,6 +394,9 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 			"error": "Failed to logout",
 		})
 	}
+
+	// Clear auth cookies
+	h.clearAuthCookies(c)
 
 	return c.JSON(fiber.Map{
 		"message": "Logged out successfully",
@@ -385,22 +467,27 @@ func (h *AuthHandler) generateAccessToken(accountID, accountNumber string) (stri
 // AuthMiddleware returns a middleware that validates JWT tokens
 func (h *AuthHandler) AuthMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
-		authHeader := string(c.Request().Header.Peek("Authorization"))
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Authorization header required",
-			})
+		var tokenString string
+
+		// First, try to get token from httpOnly cookie
+		tokenString = c.Cookies(AccessTokenCookie)
+
+		// Fall back to Authorization header for API clients
+		if tokenString == "" {
+			authHeader := string(c.Request().Header.Peek("Authorization"))
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					tokenString = parts[1]
+				}
+			}
 		}
 
-		// Extract Bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		if tokenString == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid authorization header format",
+				"error": "Authentication required",
 			})
 		}
-
-		tokenString := parts[1]
 
 		// Parse and validate token
 		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
