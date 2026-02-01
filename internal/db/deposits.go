@@ -213,7 +213,7 @@ func (db *DB) CompleteDeposit(ctx context.Context, depositID uuid.UUID) error {
 		return fmt.Errorf("deposit is not pending, current status: %s", deposit.Status)
 	}
 
-	// Update deposit status
+	// Update deposit status - the database trigger handles updating the account balance
 	now := time.Now().UTC()
 	_, err = tx.Exec(ctx, `
 		UPDATE deposits
@@ -223,17 +223,6 @@ func (db *DB) CompleteDeposit(ctx context.Context, depositID uuid.UUID) error {
 
 	if err != nil {
 		return fmt.Errorf("failed to update deposit status: %w", err)
-	}
-
-	// Update account balance
-	_, err = tx.Exec(ctx, `
-		UPDATE accounts
-		SET balance_usdc = balance_usdc + $1, updated_at = $2
-		WHERE id = $3
-	`, deposit.NetAmountUSDC, now, deposit.AccountID)
-
-	if err != nil {
-		return fmt.Errorf("failed to update account balance: %w", err)
 	}
 
 	// Commit transaction
@@ -248,7 +237,7 @@ func (db *DB) CompleteDeposit(ctx context.Context, depositID uuid.UUID) error {
 func (db *DB) FailDeposit(ctx context.Context, depositID uuid.UUID, reason string) error {
 	_, err := db.pool.Exec(ctx, `
 		UPDATE deposits
-		SET status = $1, metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('failure_reason', $2)
+		SET status = $1, metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('failure_reason', $2::text)
 		WHERE id = $3
 	`, DepositStatusFailed, reason, depositID)
 

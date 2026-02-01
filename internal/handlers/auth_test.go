@@ -102,12 +102,12 @@ func TestCreateAccount_SetsHttpOnlyCookies(t *testing.T) {
 		if strings.Contains(cookie, AccessTokenCookie) {
 			foundAccess = true
 			assert.Contains(t, cookie, "HttpOnly")
-			assert.Contains(t, cookie, "Path=/")
+			assert.Contains(t, strings.ToLower(cookie), "path=/")
 		}
 		if strings.Contains(cookie, RefreshTokenCookie) {
 			foundRefresh = true
 			assert.Contains(t, cookie, "HttpOnly")
-			assert.Contains(t, cookie, "Path=/v1/auth")
+			assert.Contains(t, strings.ToLower(cookie), "path=/v1/auth")
 		}
 	}
 
