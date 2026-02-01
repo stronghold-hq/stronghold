@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"stronghold/internal/config"
@@ -183,13 +183,13 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	addr := fmt.Sprintf(":%s", s.config.Server.Port)
-	log.Printf("Starting Stronghold API server on %s", addr)
+	slog.Info("starting Stronghold API server", "addr", addr)
 	return s.app.Listen(addr)
 }
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
-	log.Println("Shutting down server...")
+	slog.Info("shutting down server")
 
 	// Stop settlement worker first to prevent new retries
 	if s.settlementWorker != nil {
@@ -203,7 +203,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	// Close scanner
 	if err := s.scanner.Close(); err != nil {
-		log.Printf("Error closing scanner: %v", err)
+		slog.Error("error closing scanner", "error", err)
 	}
 
 	// Shutdown Fiber
@@ -223,7 +223,7 @@ func errorHandler(c fiber.Ctx, err error) error {
 	requestID := middleware.GetRequestID(c)
 
 	// Log the error with request ID
-	log.Printf("[%s] Error: %v", requestID, err)
+	slog.Error("request error", "error", err, "request_id", requestID, "status", code)
 
 	// Return JSON response
 	return c.Status(code).JSON(fiber.Map{

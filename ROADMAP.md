@@ -18,9 +18,9 @@ This document tracks the remaining work needed to launch Stronghold in productio
 
 ## High Priority
 
-- [ ] **Add structured logging** - Currently using basic `log` package
-  - Switch to `log/slog` or `zap` with JSON output
-  - Resolve TODO at `internal/handlers/auth.go:196`
+- [x] **Add structured logging** - Migrated to `log/slog`
+  - JSON output in production, text output in development
+  - All files converted: main.go, server.go, worker.go, x402.go, proxy, stronghold client
 
 - [x] **Add CI/CD test step** - Added `.github/workflows/test.yml`
   - [x] `go test -race ./...` with coverage reporting
@@ -54,9 +54,9 @@ This document tracks the remaining work needed to launch Stronghold in productio
 - [ ] **Add database query timeouts** - Queries can hang indefinitely
   - Configure context timeouts for all DB operations
 
-- [ ] **Validate config at startup** - `internal/config/config.go`
-  - Add `Validate()` method to catch missing critical env vars
-  - Fail fast if required config is missing
+- [x] **Validate config at startup** - Added `Config.Validate()` method
+  - Fails if `JWT_SECRET` or `DB_PASSWORD` missing in production
+  - Called at startup in `main.go`
 
 ## Low Priority
 
@@ -72,11 +72,11 @@ Before going live:
 
 - [x] All tests passing
 - [x] `JWT_SECRET` configured (validated at startup in production)
-- [ ] `DB_PASSWORD` changed from default
+- [x] `DB_PASSWORD` changed from default (validated at startup in production)
 - [ ] Database migrations executed
 - [ ] CORS origins configured for production domain
 - [x] Rate limiting enabled
-- [ ] Structured logging verified
+- [x] Structured logging verified
 - [x] Health checks returning accurate status
 - [ ] No secrets in git history
 - [ ] SSL/TLS certificates configured

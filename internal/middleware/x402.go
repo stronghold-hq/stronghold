@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -140,7 +140,7 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 					})
 				}
 			} else if err != nil && err != pgx.ErrNoRows {
-				log.Printf("Error checking payment nonce: %v", err)
+				slog.Error("error checking payment nonce", "error", err)
 			}
 		}
 
@@ -166,7 +166,7 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 
 			if err := m.db.CreatePaymentTransaction(c.Context(), paymentTx); err != nil {
 				// If nonce already exists, this is a duplicate request
-				log.Printf("Failed to create payment transaction: %v", err)
+				slog.Error("failed to create payment transaction", "error", err)
 				return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 					"error": "Duplicate payment nonce",
 				})
@@ -174,7 +174,7 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 
 			// Transition to executing
 			if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusReserved, db.PaymentStatusExecuting); err != nil {
-				log.Printf("Failed to transition payment to executing: %v", err)
+				slog.Error("failed to transition payment to executing", "error", err)
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Payment processing error",
 				})
@@ -205,14 +205,14 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 		// Transition to settling and attempt settlement
 		if m.db != nil && paymentTx != nil {
 			if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusSettling); err != nil {
-				log.Printf("Failed to transition payment to settling: %v", err)
+				slog.Error("failed to transition payment to settling", "error", err)
 			}
 		}
 
 		// Settle payment (blocking)
 		paymentID, err := m.settlePayment(paymentHeader)
 		if err != nil {
-			log.Printf("Failed to settle payment: %v", err)
+			slog.Error("failed to settle payment", "error", err)
 			if m.db != nil && paymentTx != nil {
 				_ = m.db.FailSettlement(c.Context(), paymentTx.ID, err.Error())
 			}
@@ -229,7 +229,7 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 		// Mark completed
 		if m.db != nil && paymentTx != nil {
 			if err := m.db.CompleteSettlement(c.Context(), paymentTx.ID, paymentID); err != nil {
-				log.Printf("Failed to mark payment as completed: %v", err)
+				slog.Error("failed to mark payment as completed", "error", err)
 			}
 		}
 
@@ -499,7 +499,7 @@ func (m *X402Middleware) SettleAfterHandler() fiber.Handler {
 			paymentID, err := m.settlePayment(paymentHeader)
 			if err != nil {
 				// Log but don't fail the request - payment was already verified
-				fmt.Printf("Failed to settle payment: %v\n", err)
+				slog.Error("failed to settle payment", "error", err)
 			} else {
 				m.PaymentResponse(c, paymentID)
 			}

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,15 +16,20 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// Setup structured logging - JSON for production, text for development
+	setupLogging(cfg)
+
 	// Validate configuration - fails in production if critical values are missing
 	if err := cfg.Validate(); err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		slog.Error("configuration error", "error", err)
+		os.Exit(1)
 	}
 
 	// Create server
 	srv, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		slog.Error("failed to create server", "error", err)
+		os.Exit(1)
 	}
 
 	// Create a context that will be cancelled on shutdown signal
@@ -33,7 +38,8 @@ func main() {
 	// Start server in a goroutine (includes settlement worker)
 	go func() {
 		if err := srv.Start(ctx); err != nil {
-			log.Fatalf("Server error: %v", err)
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -42,7 +48,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down...")
+	slog.Info("shutting down")
 
 	// Cancel context to signal workers to stop
 	cancel()
@@ -52,8 +58,28 @@ func main() {
 	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		slog.Error("server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Server exited")
+	slog.Info("server exited")
+}
+
+// setupLogging configures the global slog logger
+func setupLogging(cfg *config.Config) {
+	var handler slog.Handler
+
+	if cfg.IsProduction() {
+		// JSON output for production - easy to parse by log aggregators
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+	} else {
+		// Text output for development - human readable
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		})
+	}
+
+	slog.SetDefault(slog.New(handler))
 }

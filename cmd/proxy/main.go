@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,20 +11,25 @@ import (
 )
 
 func main() {
-	// Setup logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.SetPrefix("[stronghold-proxy] ")
+	// Setup structured logging
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+	})
+	slog.SetDefault(slog.New(handler))
 
 	// Load configuration from environment or config file
 	config, err := proxy.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Create and start the proxy server
 	server, err := proxy.NewServer(config)
 	if err != nil {
-		log.Fatalf("Failed to create proxy server: %v", err)
+		slog.Error("failed to create proxy server", "error", err)
+		os.Exit(1)
 	}
 
 	// Setup graceful shutdown
@@ -37,7 +42,7 @@ func main() {
 	// Start server in a goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		log.Printf("Starting Stronghold proxy on %s", config.GetProxyAddr())
+		slog.Info("starting stronghold proxy", "addr", config.GetProxyAddr())
 		if err := server.Start(ctx); err != nil {
 			errChan <- err
 		}
@@ -46,16 +51,17 @@ func main() {
 	// Wait for shutdown signal or error
 	select {
 	case sig := <-sigChan:
-		log.Printf("Received signal: %v", sig)
+		slog.Info("received signal", "signal", sig)
 	case err := <-errChan:
-		log.Fatalf("Server error: %v", err)
+		slog.Error("server error", "error", err)
+		os.Exit(1)
 	}
 
 	// Graceful shutdown
-	log.Println("Shutting down proxy...")
+	slog.Info("shutting down proxy")
 	if err := server.Shutdown(context.Background()); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		slog.Error("error during shutdown", "error", err)
 	}
 
-	log.Println("Proxy stopped")
+	slog.Info("proxy stopped")
 }

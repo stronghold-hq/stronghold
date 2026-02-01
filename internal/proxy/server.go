@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -79,7 +79,7 @@ type Server struct {
 	wallet         *wallet.Wallet
 	httpServer     *http.Server
 	listener       net.Listener
-	logger         *log.Logger
+	logger         *slog.Logger
 	requestCount   int64
 	blockedCount   int64
 	warnedCount    int64
@@ -89,14 +89,20 @@ type Server struct {
 // NewServer creates a new proxy server
 func NewServer(config *Config) (*Server, error) {
 	// Setup logging
-	logger := log.New(os.Stdout, "[stronghold-proxy] ", log.LstdFlags|log.Lshortfile)
+	var handler slog.Handler
+	output := os.Stdout
 
 	if config.Logging.File != "" {
-		f, err := os.OpenFile(config.Logging.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err == nil {
-			logger.SetOutput(f)
+		if f, err := os.OpenFile(config.Logging.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			output = f
 		}
 	}
+
+	handler = slog.NewTextHandler(output, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+	})
+	logger := slog.New(handler)
 
 	// Create scanner client
 	scanner := NewScannerClient(config.API.Endpoint, config.Auth.Token)
@@ -114,11 +120,11 @@ func NewServer(config *Config) (*Server, error) {
 			Network: config.Wallet.Network,
 		})
 		if err != nil {
-			logger.Printf("Warning: failed to load wallet: %v", err)
+			logger.Warn("failed to load wallet", "error", err)
 		} else if w.Exists() {
 			s.wallet = w
 			scanner.SetWallet(w)
-			logger.Printf("Wallet loaded: %s", config.Wallet.Address)
+			logger.Info("wallet loaded", "address", config.Wallet.Address)
 		}
 	}
 
@@ -199,12 +205,12 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.listener = listener
-	s.logger.Printf("Proxy listening on %s", addr)
+	s.logger.Info("proxy listening", "addr", addr)
 
 	// Start accepting connections
 	go func() {
 		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			s.logger.Printf("Server error: %v", err)
+			s.logger.Error("server error", "error", err)
 		}
 	}()
 
@@ -226,7 +232,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Log the request
-	s.logger.Printf("[%s] %s %s", r.Method, r.URL.String(), r.Proto)
+	s.logger.Debug("incoming request", "method", r.Method, "url", r.URL.String(), "proto", r.Proto)
 
 	// Increment request count
 	s.mu.Lock()
@@ -253,7 +259,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 
 	_, err := url.Parse(targetURL)
 	if err != nil {
-		s.logger.Printf("Error parsing URL: %v", err)
+		s.logger.Error("error parsing URL", "error", err)
 		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
@@ -261,7 +267,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	// Create the outgoing request
 	outReq, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
-		s.logger.Printf("Error creating request: %v", err)
+		s.logger.Error("error creating request", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -287,7 +293,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 
 	resp, err := client.Do(outReq)
 	if err != nil {
-		s.logger.Printf("Error forwarding request: %v", err)
+		s.logger.Error("error forwarding request", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -296,7 +302,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	// Read the response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		s.logger.Printf("Error reading response body: %v", err)
+		s.logger.Error("error reading response body", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -318,7 +324,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 			s.blockedCount++
 			s.mu.Unlock()
 
-			s.logger.Printf("BLOCKED: %s - %s", targetURL, scanResult.Reason)
+			s.logger.Warn("content blocked", "url", targetURL, "reason", scanResult.Reason)
 
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(fmt.Sprintf(`{
@@ -336,7 +342,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 			s.warnedCount++
 			s.mu.Unlock()
 
-			s.logger.Printf("WARNED: %s - %s", targetURL, scanResult.Reason)
+			s.logger.Warn("content warned", "url", targetURL, "reason", scanResult.Reason)
 			w.Header().Set("X-Stronghold-Warning", scanResult.Reason)
 		}
 	} else {
@@ -359,7 +365,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
 	if err != nil {
-		s.logger.Printf("Error connecting to %s: %v", r.Host, err)
+		s.logger.Error("error connecting to host", "host", r.Host, "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -375,7 +381,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
-		s.logger.Printf("Error hijacking connection: %v", err)
+		s.logger.Error("error hijacking connection", "error", err)
 		return
 	}
 	defer clientConn.Close()
@@ -396,7 +402,7 @@ func (s *Server) scanResponse(body []byte, sourceURL, contentType string) *ScanR
 
 	// Skip if content is too large (> 1MB)
 	if len(body) > 1024*1024 {
-		s.logger.Printf("Skipping scan: content too large (%d bytes)", len(body))
+		s.logger.Debug("skipping scan: content too large", "bytes", len(body))
 		return nil
 	}
 
@@ -411,7 +417,7 @@ func (s *Server) scanResponse(body []byte, sourceURL, contentType string) *ScanR
 
 	result, err := s.scanner.ScanContent(ctx, body, sourceURL, contentType)
 	if err != nil {
-		s.logger.Printf("Scan error: %v", err)
+		s.logger.Error("scan error", "error", err)
 
 		// Fail open or closed based on configuration
 		if s.config.Scanning.FailOpen {

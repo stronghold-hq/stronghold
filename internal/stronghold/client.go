@@ -3,6 +3,7 @@ package stronghold
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -82,7 +83,7 @@ func NewScanner(cfg *config.StrongholdConfig) (*Scanner, error) {
 		hybridDetector, err := ml.NewHybridDetector(ollamaURL, openRouterKey, openRouterModel)
 		if err != nil {
 			// Log but don't fail - fallback to threat scorer only
-			fmt.Printf("Warning: Failed to initialize hybrid detector: %v\n", err)
+			slog.Warn("failed to initialize hybrid detector", "error", err)
 		} else {
 			s.hybridDetector = hybridDetector
 		}

@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -80,14 +80,14 @@ func (w *Worker) Start(ctx context.Context) {
 		w.runExpirationLoop(ctx)
 	}()
 
-	log.Println("Settlement worker started")
+	slog.Info("settlement worker started")
 }
 
 // Stop gracefully stops the worker
 func (w *Worker) Stop() {
 	close(w.stopCh)
 	w.wg.Wait()
-	log.Println("Settlement worker stopped")
+	slog.Info("settlement worker stopped")
 }
 
 // runRetryLoop periodically retries failed settlements
@@ -129,7 +129,7 @@ func (w *Worker) retryFailedSettlements(ctx context.Context) {
 	// Get failed payments that haven't exceeded max retries
 	payments, err := w.db.GetPendingSettlements(ctx, w.config.MaxRetryAttempts, w.config.BatchSize)
 	if err != nil {
-		log.Printf("Failed to get pending settlements: %v", err)
+		slog.Error("failed to get pending settlements", "error", err)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (w *Worker) retryFailedSettlements(ctx context.Context) {
 		return
 	}
 
-	log.Printf("Retrying %d failed settlements", len(payments))
+	slog.Info("retrying failed settlements", "count", len(payments))
 
 	for _, payment := range payments {
 		select {
@@ -158,29 +158,27 @@ func (w *Worker) retryFailedSettlements(ctx context.Context) {
 
 		// Transition to settling
 		if err := w.db.MarkSettling(ctx, payment.ID); err != nil {
-			log.Printf("Failed to mark payment %s as settling: %v", payment.ID, err)
+			slog.Error("failed to mark payment as settling", "payment_id", payment.ID, "error", err)
 			continue
 		}
 
 		// Attempt settlement
 		paymentID, err := w.settlePayment(payment.PaymentHeader)
 		if err != nil {
-			log.Printf("Settlement retry failed for payment %s (attempt %d): %v",
-				payment.ID, payment.SettlementAttempts+1, err)
+			slog.Error("settlement retry failed", "payment_id", payment.ID, "attempt", payment.SettlementAttempts+1, "error", err)
 			if err := w.db.FailSettlement(ctx, payment.ID, err.Error()); err != nil {
-				log.Printf("Failed to record settlement failure: %v", err)
+				slog.Error("failed to record settlement failure", "error", err)
 			}
 			continue
 		}
 
 		// Success!
 		if err := w.db.CompleteSettlement(ctx, payment.ID, paymentID); err != nil {
-			log.Printf("Failed to mark payment %s as completed: %v", payment.ID, err)
+			slog.Error("failed to mark payment as completed", "payment_id", payment.ID, "error", err)
 			continue
 		}
 
-		log.Printf("Successfully settled payment %s on retry attempt %d",
-			payment.ID, payment.SettlementAttempts+1)
+		slog.Info("successfully settled payment on retry", "payment_id", payment.ID, "attempt", payment.SettlementAttempts+1)
 	}
 }
 
@@ -188,12 +186,12 @@ func (w *Worker) retryFailedSettlements(ctx context.Context) {
 func (w *Worker) expireStaleReservations(ctx context.Context) {
 	count, err := w.db.ExpireStaleReservations(ctx)
 	if err != nil {
-		log.Printf("Failed to expire stale reservations: %v", err)
+		slog.Error("failed to expire stale reservations", "error", err)
 		return
 	}
 
 	if count > 0 {
-		log.Printf("Expired %d stale payment reservations", count)
+		slog.Info("expired stale payment reservations", "count", count)
 	}
 }
 
