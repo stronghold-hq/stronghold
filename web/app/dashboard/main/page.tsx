@@ -12,6 +12,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatUSDC, truncateAddress } from '@/lib/utils';
 
 export default function DashboardPage() {
@@ -31,8 +33,95 @@ export default function DashboardPage() {
 
   if (isLoading || !account) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-        <div className="animate-pulse text-[#00D4AA]">Loading...</div>
+      <div className="min-h-screen bg-[#0a0a0a]">
+        {/* Skeleton Header */}
+        <header className="border-b border-[#222]">
+          <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Skeleton className="w-10 h-10 rounded-xl" />
+              <Skeleton className="w-24 h-6" />
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden sm:block">
+                <Skeleton className="w-16 h-4 mb-1" />
+                <Skeleton className="w-32 h-5" />
+              </div>
+              <Skeleton className="w-9 h-9 rounded" />
+            </div>
+          </div>
+        </header>
+
+        {/* Skeleton Content */}
+        <main className="max-w-6xl mx-auto px-4 py-8">
+          {/* Balance Card Skeleton */}
+          <div className="bg-gradient-to-br from-[#111] to-[#1a1a1a] border border-[#222] rounded-2xl p-6 mb-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <Skeleton className="w-16 h-4 mb-2" />
+                <Skeleton className="w-40 h-10" />
+              </div>
+              <Skeleton className="w-12 h-12 rounded-xl" />
+            </div>
+            <div className="flex gap-3">
+              <Skeleton className="flex-1 h-11 rounded-lg" />
+              <Skeleton className="w-24 h-11 rounded-lg" />
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Wallet Skeleton */}
+            <div className="bg-[#111] border border-[#222] rounded-2xl p-6">
+              <Skeleton className="w-16 h-5 mb-4" />
+              <Skeleton className="w-full h-16 rounded-lg" />
+              <Skeleton className="w-48 h-4 mt-3" />
+            </div>
+
+            {/* Activity Skeleton */}
+            <div className="bg-[#111] border border-[#222] rounded-2xl p-6">
+              <Skeleton className="w-16 h-5 mb-4" />
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="w-10 h-10 rounded-lg" />
+                  <div className="flex-1">
+                    <Skeleton className="w-24 h-4 mb-1" />
+                    <Skeleton className="w-16 h-3" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Skeleton className="w-10 h-10 rounded-lg" />
+                  <div className="flex-1">
+                    <Skeleton className="w-28 h-4 mb-1" />
+                    <Skeleton className="w-12 h-3" />
+                  </div>
+                </div>
+              </div>
+              <Skeleton className="w-32 h-4 mt-4 mx-auto" />
+            </div>
+          </div>
+
+          {/* Account Info Skeleton */}
+          <div className="bg-[#111] border border-[#222] rounded-2xl p-6 mt-6">
+            <Skeleton className="w-40 h-5 mb-4" />
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <Skeleton className="w-24 h-4 mb-1" />
+                <Skeleton className="w-36 h-5" />
+              </div>
+              <div>
+                <Skeleton className="w-12 h-4 mb-1" />
+                <Skeleton className="w-16 h-5" />
+              </div>
+              <div>
+                <Skeleton className="w-16 h-4 mb-1" />
+                <Skeleton className="w-24 h-5" />
+              </div>
+              <div>
+                <Skeleton className="w-20 h-4 mb-1" />
+                <Skeleton className="w-32 h-5" />
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }

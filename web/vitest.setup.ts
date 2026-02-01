@@ -44,6 +44,11 @@ vi.mock('framer-motion', () => {
       section: createMotionComponent('section'),
       header: createMotionComponent('header'),
       footer: createMotionComponent('footer'),
+      tr: createMotionComponent('tr'),
+      td: createMotionComponent('td'),
+      table: createMotionComponent('table'),
+      tbody: createMotionComponent('tbody'),
+      thead: createMotionComponent('thead'),
     },
     AnimatePresence: ({ children }: any) => children,
     useAnimation: () => ({

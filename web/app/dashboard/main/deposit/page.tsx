@@ -11,6 +11,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatUSDC, truncateAddress, copyToClipboard } from '@/lib/utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -232,9 +233,16 @@ export default function DepositPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting || !amount}
-                  className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors"
+                  className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
-                  {isSubmitting ? 'Processing...' : 'Continue to Payment'}
+                  {isSubmitting ? (
+                    <>
+                      <LoadingSpinner size="sm" className="border-black border-t-transparent" />
+                      Processing...
+                    </>
+                  ) : (
+                    'Continue to Payment'
+                  )}
                 </button>
               </form>
             ) : (
