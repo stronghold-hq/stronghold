@@ -26,6 +26,7 @@ type Config struct {
 	Cookie      CookieConfig
 	Dashboard   DashboardConfig
 	X402        X402Config
+	Stripe      StripeConfig
 	Stronghold  StrongholdConfig
 	Pricing     PricingConfig
 	RateLimit   RateLimitConfig
@@ -73,6 +74,13 @@ type X402Config struct {
 	WalletAddress   string
 	FacilitatorURL  string
 	Network         string
+}
+
+// StripeConfig holds Stripe payment configuration
+type StripeConfig struct {
+	SecretKey      string
+	WebhookSecret  string
+	PublishableKey string
 }
 
 // StrongholdConfig holds Stronghold scanner configuration
@@ -145,6 +153,11 @@ func Load() *Config {
 			WalletAddress:  getEnv("X402_WALLET_ADDRESS", ""),
 			FacilitatorURL: getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
 			Network:        getEnv("X402_NETWORK", "base-sepolia"),
+		},
+		Stripe: StripeConfig{
+			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),
+			WebhookSecret:  getEnv("STRIPE_WEBHOOK_SECRET", ""),
+			PublishableKey: getEnv("STRIPE_PUBLISHABLE_KEY", ""),
 		},
 		Stronghold: StrongholdConfig{
 			BlockThreshold:  getFloat("STRONGHOLD_BLOCK_THRESHOLD", 0.55),
@@ -239,6 +252,19 @@ func (c *Config) Validate() error {
 	if c.Database.Password == "" {
 		if c.Environment == EnvProduction {
 			errs = append(errs, "DB_PASSWORD is required in production")
+		}
+	}
+
+	// Stripe keys are required in production
+	if c.Environment == EnvProduction {
+		if c.Stripe.SecretKey == "" {
+			errs = append(errs, "STRIPE_SECRET_KEY is required in production")
+		}
+		if c.Stripe.WebhookSecret == "" {
+			errs = append(errs, "STRIPE_WEBHOOK_SECRET is required in production")
+		}
+		if c.Stripe.PublishableKey == "" {
+			errs = append(errs, "STRIPE_PUBLISHABLE_KEY is required in production")
 		}
 	}
 

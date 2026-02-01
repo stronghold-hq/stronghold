@@ -157,8 +157,12 @@ func (s *Server) setupRoutes() {
 			Secure:   s.config.Cookie.Secure,
 			SameSite: s.config.Cookie.SameSite,
 		},
-	})
+	}, &s.config.Stripe)
 	accountHandler.RegisterRoutes(s.app, s.authHandler)
+
+	// Stripe webhook handler (no auth required - verified via signature)
+	stripeWebhookHandler := handlers.NewStripeWebhookHandler(s.database, &s.config.Stripe)
+	s.app.Post("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
 
 	// Scan handlers (payment required - now uses AtomicPayment for atomic settlement)
 	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, s.database)

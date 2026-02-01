@@ -81,7 +81,7 @@ func createTestApp(t *testing.T, testDB *testutil.TestDB) (*fiber.App, *db.DB) {
 	authHandler.RegisterRoutesWithMiddleware(app, rateLimiter.AuthLimiter())
 
 	// Account routes
-	accountHandler := handlers.NewAccountHandler(database, authConfig)
+	accountHandler := handlers.NewAccountHandler(database, authConfig, nil)
 	accountHandler.RegisterRoutes(app, authHandler)
 
 	return app, database

@@ -1,8 +1,15 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
+	"stronghold/internal/config"
 	"stronghold/internal/db"
 
 	"github.com/gofiber/fiber/v3"
@@ -11,15 +18,17 @@ import (
 
 // AccountHandler handles account management endpoints
 type AccountHandler struct {
-	db         *db.DB
-	authConfig *AuthConfig
+	db           *db.DB
+	authConfig   *AuthConfig
+	stripeConfig *config.StripeConfig
 }
 
 // NewAccountHandler creates a new account handler
-func NewAccountHandler(database *db.DB, authConfig *AuthConfig) *AccountHandler {
+func NewAccountHandler(database *db.DB, authConfig *AuthConfig, stripeConfig *config.StripeConfig) *AccountHandler {
 	return &AccountHandler{
-		db:         database,
-		authConfig: authConfig,
+		db:           database,
+		authConfig:   authConfig,
+		stripeConfig: stripeConfig,
 	}
 }
 
@@ -203,13 +212,15 @@ type InitiateDepositRequest struct {
 
 // InitiateDepositResponse represents the response after initiating a deposit
 type InitiateDepositResponse struct {
-	DepositID     string  `json:"deposit_id"`
-	AmountUSDC    float64 `json:"amount_usdc"`
-	Provider      string  `json:"provider"`
-	Status        string  `json:"status"`
-	CheckoutURL   *string `json:"checkout_url,omitempty"`
-	WalletAddress *string `json:"wallet_address,omitempty"`
-	Instructions  string  `json:"instructions"`
+	DepositID      string  `json:"deposit_id"`
+	AmountUSDC     float64 `json:"amount_usdc"`
+	Provider       string  `json:"provider"`
+	Status         string  `json:"status"`
+	CheckoutURL    *string `json:"checkout_url,omitempty"`
+	ClientSecret   *string `json:"client_secret,omitempty"`
+	PublishableKey *string `json:"publishable_key,omitempty"`
+	WalletAddress  *string `json:"wallet_address,omitempty"`
+	Instructions   string  `json:"instructions"`
 }
 
 // InitiateDeposit initiates a new deposit
@@ -293,11 +304,36 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 
 	switch provider {
 	case db.DepositProviderStripe:
-		// In production, this would create a Stripe Checkout Session
-		// and return the checkout URL
-		checkoutURL := "https://checkout.stripe.com/pay/placeholder"
-		resp.CheckoutURL = &checkoutURL
-		resp.Instructions = "Complete your payment using the provided checkout URL. Funds will be credited to your account upon completion."
+		// Require linked wallet for Stripe onramp
+		if account.WalletAddress == nil || *account.WalletAddress == "" {
+			// Cancel the pending deposit
+			_ = h.db.FailDeposit(ctx, deposit.ID, "No wallet linked")
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "You must link a wallet address before using Stripe to purchase crypto",
+			})
+		}
+
+		// Create Stripe Crypto Onramp session
+		session, err := h.createStripeOnrampSession(deposit.ID.String(), *account.WalletAddress)
+		if err != nil {
+			// Mark deposit as failed
+			_ = h.db.FailDeposit(ctx, deposit.ID, fmt.Sprintf("Failed to create Stripe session: %v", err))
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create payment session",
+			})
+		}
+
+		// Update deposit with session ID
+		if err := h.db.UpdateDepositProviderTransaction(ctx, deposit.ID, session.ID); err != nil {
+			// Log but don't fail - the session was created successfully
+			_ = err
+		}
+
+		resp.ClientSecret = &session.ClientSecret
+		if h.stripeConfig != nil {
+			resp.PublishableKey = &h.stripeConfig.PublishableKey
+		}
+		resp.Instructions = "Complete your purchase using the Stripe Crypto Onramp. USDC will be delivered to your wallet and credited to your account."
 
 	case db.DepositProviderDirect:
 		if account.WalletAddress != nil {
@@ -413,4 +449,69 @@ func calculateFee(amount float64, provider db.DepositProvider) float64 {
 	default:
 		return 0
 	}
+}
+
+// stripeOnrampSession represents a Stripe Crypto Onramp session response
+type stripeOnrampSession struct {
+	ID           string `json:"id"`
+	ClientSecret string `json:"client_secret"`
+	Status       string `json:"status"`
+}
+
+// createStripeOnrampSession creates a Stripe Crypto Onramp session
+func (h *AccountHandler) createStripeOnrampSession(depositID, walletAddress string) (*stripeOnrampSession, error) {
+	if h.stripeConfig == nil || h.stripeConfig.SecretKey == "" {
+		return nil, fmt.Errorf("stripe not configured")
+	}
+
+	// Build form data for the API request
+	data := url.Values{}
+	data.Set("wallet_addresses[base]", walletAddress)
+	data.Set("destination_currencies[]", "usdc")
+	data.Set("destination_networks[]", "base")
+	data.Set("lock_wallet_address", "true")
+	data.Set("metadata[deposit_id]", depositID)
+
+	req, err := http.NewRequest("POST", "https://api.stripe.com/v1/crypto/onramp_sessions", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+h.stripeConfig.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Use beta header for crypto onramp API
+	req.Header.Set("Stripe-Version", "2024-12-18.acacia;crypto_onramp_beta=v2")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Stripe API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
+			return nil, fmt.Errorf("stripe error: %s", errResp.Error.Message)
+		}
+		return nil, fmt.Errorf("stripe API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var session stripeOnrampSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &session, nil
 }

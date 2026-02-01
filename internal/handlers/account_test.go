@@ -45,7 +45,7 @@ func setupAccountTest(t *testing.T) (*fiber.App, *AuthHandler, *AccountHandler, 
 	}
 
 	authHandler := NewAuthHandler(database, authConfig)
-	accountHandler := NewAccountHandler(database, authConfig)
+	accountHandler := NewAccountHandler(database, authConfig, nil)
 
 	app := fiber.New()
 	authHandler.RegisterRoutes(app)
@@ -257,13 +257,14 @@ func TestGetUsage_Pagination(t *testing.T) {
 	assert.Contains(t, body, "offset")
 }
 
-func TestInitiateDeposit_Stripe(t *testing.T) {
+func TestInitiateDeposit_Stripe_RequiresWallet(t *testing.T) {
 	app, _, _, testDB, database := setupAccountTest(t)
 	defer testDB.Close(t)
 	defer database.Close()
 
 	_, accessToken := createAuthenticatedAccount(t, app)
 
+	// Stripe deposit without linked wallet should fail
 	reqBody := map[string]interface{}{
 		"amount_usdc": 50.00,
 		"provider":    "stripe",
@@ -278,17 +279,12 @@ func TestInitiateDeposit_Stripe(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, 201, resp.StatusCode)
+	assert.Equal(t, 400, resp.StatusCode)
 
-	var body InitiateDepositResponse
+	var body map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&body)
 
-	assert.NotEmpty(t, body.DepositID)
-	assert.Equal(t, 50.00, body.AmountUSDC)
-	assert.Equal(t, "stripe", body.Provider)
-	assert.Equal(t, "pending", body.Status)
-	assert.NotNil(t, body.CheckoutURL)
-	assert.Contains(t, body.Instructions, "checkout")
+	assert.Contains(t, body["error"], "link a wallet")
 }
 
 func TestInitiateDeposit_Direct(t *testing.T) {

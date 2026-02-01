@@ -301,6 +301,21 @@ func (db *DB) GetPendingDeposits(ctx context.Context, limit int) ([]*Deposit, er
 	return deposits, nil
 }
 
+// UpdateDepositProviderTransaction updates the provider transaction ID for a deposit
+func (db *DB) UpdateDepositProviderTransaction(ctx context.Context, depositID uuid.UUID, providerTxID string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE deposits
+		SET provider_transaction_id = $1
+		WHERE id = $2
+	`, providerTxID, depositID)
+
+	if err != nil {
+		return fmt.Errorf("failed to update provider transaction ID: %w", err)
+	}
+
+	return nil
+}
+
 // GetDepositStats retrieves deposit statistics for an account
 func (db *DB) GetDepositStats(ctx context.Context, accountID uuid.UUID) (*DepositStats, error) {
 	stats := &DepositStats{}
