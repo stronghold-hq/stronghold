@@ -115,3 +115,19 @@ PostgreSQL 16 with auto-migrations in `internal/db/migrations/`. Tables: account
 - **Fly.io**: `fly deploy` (configured in fly.toml)
 - **Docker Compose**: `docker-compose up -d`
 - Caddy provides auto HTTPS with Let's Encrypt
+
+## Releases
+
+To create a new CLI release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers `.github/workflows/release.yml` which builds binaries for all platforms (linux/darwin × amd64/arm64) and publishes them to GitHub Releases.
+
+Users can install with:
+```bash
+curl -fsSL https://raw.githubusercontent.com/yv-was-taken/stronghold/master/install.sh | sh
+```
