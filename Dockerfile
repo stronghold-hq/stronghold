@@ -33,6 +33,9 @@ COPY --from=builder /app/stronghold-api .
 # Copy model files (directory will be empty if no models exist)
 COPY --from=builder /app/models ./models
 
+# Copy API documentation
+COPY --from=builder /app/docs ./docs
+
 # Expose port
 EXPOSE 8080
 
