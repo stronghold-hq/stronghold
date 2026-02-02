@@ -44,7 +44,7 @@ func setupAuthTest(t *testing.T) (*fiber.App, *AuthHandler, *testutil.TestDB) {
 		},
 	}
 
-	handler := NewAuthHandler(database, authConfig)
+	handler := NewAuthHandler(database, authConfig, nil) // nil KMS client for tests
 	app := fiber.New()
 	handler.RegisterRoutes(app)
 

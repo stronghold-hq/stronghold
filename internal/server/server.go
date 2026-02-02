@@ -9,6 +9,7 @@ import (
 	"stronghold/internal/config"
 	"stronghold/internal/db"
 	"stronghold/internal/handlers"
+	"stronghold/internal/kms"
 	"stronghold/internal/middleware"
 	"stronghold/internal/settlement"
 	"stronghold/internal/stronghold"
@@ -50,6 +51,21 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	// Initialize KMS client for wallet key encryption (optional in dev, required in prod)
+	var kmsClient *kms.Client
+	if cfg.KMS.Region != "" && cfg.KMS.KeyID != "" {
+		kmsClient, err = kms.New(context.Background(), &kms.Config{
+			Region: cfg.KMS.Region,
+			KeyID:  cfg.KMS.KeyID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize KMS client: %w", err)
+		}
+		slog.Info("KMS client initialized", "region", cfg.KMS.Region, "key_id", cfg.KMS.KeyID)
+	} else {
+		slog.Warn("KMS not configured - wallet keys will not be stored server-side")
+	}
+
 	// Initialize auth handler
 	authConfig := &handlers.AuthConfig{
 		JWTSecret:       cfg.Auth.JWTSecret,
@@ -63,7 +79,7 @@ func New(cfg *config.Config) (*Server, error) {
 			SameSite: cfg.Cookie.SameSite,
 		},
 	}
-	authHandler := handlers.NewAuthHandler(database, authConfig)
+	authHandler := handlers.NewAuthHandler(database, authConfig, kmsClient)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{

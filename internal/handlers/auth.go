@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	"stronghold/internal/db"
+	"stronghold/internal/kms"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -39,8 +42,9 @@ type AuthConfig struct {
 
 // AuthHandler handles authentication endpoints
 type AuthHandler struct {
-	db     *db.DB
-	config *AuthConfig
+	db        *db.DB
+	config    *AuthConfig
+	kmsClient *kms.Client
 }
 
 // Cookie names
@@ -50,10 +54,11 @@ const (
 )
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler(database *db.DB, config *AuthConfig) *AuthHandler {
+func NewAuthHandler(database *db.DB, config *AuthConfig, kmsClient *kms.Client) *AuthHandler {
 	return &AuthHandler{
-		db:     database,
-		config: config,
+		db:        database,
+		config:    config,
+		kmsClient: kmsClient,
 	}
 }
 
@@ -168,11 +173,11 @@ type CreateAccountResponse struct {
 
 // CreateAccount creates a new account with a generated account number
 // @Summary Create a new account
-// @Description Creates a new account with a generated account number. Optionally link a wallet address.
+// @Description Creates a new account with a generated account number and server-side wallet.
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body CreateAccountRequest false "Optional wallet address"
+// @Param request body CreateAccountRequest false "Optional wallet address (ignored if KMS is configured)"
 // @Success 201 {object} CreateAccountResponse
 // @Failure 400 {object} map[string]string "Invalid request"
 // @Failure 500 {object} map[string]string "Server error"
@@ -185,14 +190,101 @@ func (h *AuthHandler) CreateAccount(c fiber.Ctx) error {
 		})
 	}
 
+	ctx := c.Context()
+
+	var walletAddress *string
+
+	// If KMS is configured, generate wallet server-side and encrypt the key
+	if h.kmsClient != nil {
+		// Generate new key pair
+		privateKey, err := crypto.GenerateKey()
+		if err != nil {
+			slog.Error("failed to generate wallet key", "error", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create wallet",
+			})
+		}
+
+		// Get wallet address from public key
+		address := crypto.PubkeyToAddress(privateKey.PublicKey).Hex()
+		walletAddress = &address
+
+		// Convert private key to hex for encryption
+		privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
+
+		// Encrypt via KMS
+		encryptedKey, err := h.kmsClient.Encrypt(ctx, privateKeyHex)
+		if err != nil {
+			slog.Error("failed to encrypt wallet key", "error", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to secure wallet",
+			})
+		}
+
+		// Zero out the private key from memory immediately
+		privateKey.D.SetUint64(0)
+
+		// Create account with wallet address
+		account, err := h.db.CreateAccount(ctx, walletAddress)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create account",
+			})
+		}
+
+		// Store encrypted key in DB
+		if err := h.db.StoreEncryptedKey(ctx, account.ID, encryptedKey, h.kmsClient.KeyID()); err != nil {
+			slog.Error("failed to store encrypted key", "error", err, "account_id", account.ID)
+			// Account was created but key storage failed - this is a critical error
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to store wallet key",
+			})
+		}
+
+		// Create session
+		ip := c.IP()
+		userAgent := string(c.Request().Header.UserAgent())
+		_, refreshToken, err := h.db.CreateSession(ctx, account.ID, net.ParseIP(ip), userAgent, h.config.RefreshTokenTTL)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create session",
+			})
+		}
+
+		// Generate access token
+		accessToken, expiresAt, err := h.generateAccessToken(account.ID.String(), account.AccountNumber)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to generate access token",
+			})
+		}
+
+		// Generate recovery file content
+		recoveryFile := generateRecoveryFile(account.AccountNumber, account.ID.String())
+
+		// Set httpOnly cookies
+		refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
+		h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
+
+		slog.Info("account created with KMS-encrypted wallet",
+			"account_id", account.ID,
+			"wallet_address", address,
+		)
+
+		return c.Status(fiber.StatusCreated).JSON(CreateAccountResponse{
+			AccountNumber: account.AccountNumber,
+			ExpiresAt:     expiresAt,
+			RecoveryFile:  recoveryFile,
+		})
+	}
+
+	// Fallback: No KMS configured (development mode)
 	// Validate wallet address if provided
 	if req.WalletAddress != nil && !isValidWalletAddress(*req.WalletAddress) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid wallet address format",
 		})
 	}
-
-	ctx := c.Context()
 
 	// Create account
 	account, err := h.db.CreateAccount(ctx, req.WalletAddress)
@@ -243,11 +335,13 @@ type LoginRequest struct {
 type LoginResponse struct {
 	AccountNumber string    `json:"account_number"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	WalletAddress *string   `json:"wallet_address,omitempty"`
+	PrivateKey    *string   `json:"private_key,omitempty"` // Only returned over TLS when KMS-encrypted key exists
 }
 
 // Login authenticates an account by account number
 // @Summary Login to an account
-// @Description Authenticates using account number and sets httpOnly auth cookies
+// @Description Authenticates using account number and sets httpOnly auth cookies. Returns decrypted wallet key if KMS-encrypted key exists.
 // @Tags auth
 // @Accept json
 // @Produce json
@@ -341,10 +435,38 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
 	h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
 
-	return c.JSON(LoginResponse{
+	// Build response
+	response := LoginResponse{
 		AccountNumber: account.AccountNumber,
 		ExpiresAt:     expiresAt,
-	})
+		WalletAddress: account.WalletAddress,
+	}
+
+	// If KMS is configured and account has an encrypted key, decrypt and include it
+	if h.kmsClient != nil {
+		hasKey, err := h.db.HasEncryptedKey(ctx, account.ID)
+		if err != nil {
+			slog.Error("failed to check encrypted key", "account_id", account.ID, "error", err)
+		} else if hasKey {
+			encryptedKey, err := h.db.GetEncryptedKey(ctx, account.ID)
+			if err != nil {
+				slog.Error("failed to get encrypted key", "account_id", account.ID, "error", err)
+			} else {
+				privateKeyHex, err := h.kmsClient.Decrypt(ctx, encryptedKey)
+				if err != nil {
+					slog.Error("failed to decrypt wallet key", "account_id", account.ID, "error", err)
+				} else {
+					response.PrivateKey = &privateKeyHex
+					slog.Info("wallet key decrypted for login",
+						"account_id", account.ID,
+						"ip", c.IP(),
+					)
+				}
+			}
+		}
+	}
+
+	return c.JSON(response)
 }
 
 // RefreshTokenRequest represents a token refresh request

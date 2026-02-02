@@ -205,32 +205,72 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 
 	case StateAccount:
 		if m.accountChoice == 0 { // Create new account
-			// Generate a unique user ID for wallet creation
-			userID := generateUserID()
-			m.config.Auth.UserID = userID
-
-			// Create wallet for user
-			walletAddress, err := SetupWallet(userID, "base")
+			// Try to create account via API
+			apiClient := NewAPIClient(m.config.API.Endpoint)
+			resp, err := apiClient.CreateAccount(&CreateAccountRequest{})
 			if err != nil {
-				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet setup failed: %v", err)))
-			} else {
-				m.config.Wallet.Address = walletAddress
-				m.config.Wallet.Network = "base"
-				m.walletAddress = walletAddress
-				m.progress = append(m.progress, successStyle.Render("✓ Wallet created"))
-			}
+				// API failed, fall back to local wallet creation
+				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ API unavailable: %v", err)))
 
-			// In production, this would call the API to create an account
-			// For now, we simulate account creation
-			m.accountNumber = generateSimulatedAccountNumber()
-			m.config.Auth.AccountNumber = m.accountNumber
-			m.config.Auth.LoggedIn = true
-			m.loggedIn = true
+				// Generate a unique user ID for wallet creation
+				userID := generateUserID()
+				m.config.Auth.UserID = userID
+
+				// Create wallet locally
+				walletAddress, err := SetupWallet(userID, "base")
+				if err != nil {
+					m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet setup failed: %v", err)))
+				} else {
+					m.config.Wallet.Address = walletAddress
+					m.config.Wallet.Network = "base"
+					m.walletAddress = walletAddress
+					m.progress = append(m.progress, successStyle.Render("✓ Wallet created locally"))
+				}
+
+				// Generate simulated account number for offline mode
+				m.accountNumber = generateSimulatedAccountNumber()
+				m.config.Auth.AccountNumber = m.accountNumber
+				m.config.Auth.LoggedIn = true
+				m.loggedIn = true
+			} else {
+				// API success - account and wallet created server-side
+				m.accountNumber = resp.AccountNumber
+				m.config.Auth.AccountNumber = resp.AccountNumber
+				m.config.Auth.LoggedIn = true
+				m.loggedIn = true
+				m.progress = append(m.progress, successStyle.Render("✓ Account created via API"))
+
+				// Now login to get the wallet key (if KMS is configured)
+				loginResp, err := apiClient.Login(resp.AccountNumber)
+				if err != nil {
+					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Login failed: %v", err)))
+				} else if loginResp.PrivateKey != nil && loginResp.WalletAddress != nil {
+					// Import the wallet key from server
+					userID := generateUserID()
+					m.config.Auth.UserID = userID
+
+					address, err := ImportWallet(userID, "base", *loginResp.PrivateKey)
+					if err != nil {
+						m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet import failed: %v", err)))
+					} else {
+						m.config.Wallet.Address = address
+						m.config.Wallet.Network = "base"
+						m.walletAddress = address
+						m.progress = append(m.progress, successStyle.Render("✓ Wallet synced from server"))
+					}
+				} else if loginResp.WalletAddress != nil {
+					// Server has wallet address but no KMS key (legacy account)
+					m.config.Wallet.Address = *loginResp.WalletAddress
+					m.config.Wallet.Network = "base"
+					m.walletAddress = *loginResp.WalletAddress
+				}
+			}
 
 			m.state = StatePayment
 		} else if m.accountChoice == 1 { // Use existing account
-			// User would enter their account number
-			// For now, we skip to payment
+			// User would enter their account number - for now, prompt and try login
+			// In a full implementation, this would show a text input for account number
+			// For now, skip to payment and user can login later
 			m.state = StatePayment
 		} else { // Skip
 			m.state = StatePayment

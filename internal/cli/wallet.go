@@ -160,3 +160,22 @@ func SetupWallet(userID string, network string) (string, error) {
 
 	return w.AddressString(), nil
 }
+
+// ImportWallet imports a wallet from a private key hex string
+// This is used when logging in on a new device to restore the server-stored wallet
+func ImportWallet(userID string, network string, privateKeyHex string) (string, error) {
+	w, err := wallet.New(wallet.Config{
+		UserID:  userID,
+		Network: network,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize wallet: %w", err)
+	}
+
+	// Import the private key
+	if _, err := w.Import(privateKeyHex); err != nil {
+		return "", fmt.Errorf("failed to import wallet: %w", err)
+	}
+
+	return w.AddressString(), nil
+}

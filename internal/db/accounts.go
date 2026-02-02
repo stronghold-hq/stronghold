@@ -33,6 +33,10 @@ type Account struct {
 	UpdatedAt      time.Time       `json:"updated_at"`
 	LastLoginAt    *time.Time      `json:"last_login_at,omitempty"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
+	// Encrypted wallet key fields - never exposed via JSON
+	EncryptedPrivateKey *string    `json:"-"`
+	KMSKeyID            *string    `json:"-"`
+	KeyEncryptedAt      *time.Time `json:"-"`
 }
 
 // GenerateAccountNumber creates a cryptographically secure 16-digit account number
@@ -318,4 +322,62 @@ func normalizeAccountNumber(input string) string {
 	// Format as XXXX-XXXX-XXXX-XXXX
 	return fmt.Sprintf("%s-%s-%s-%s",
 		digits[0:4], digits[4:8], digits[8:12], digits[12:16])
+}
+
+// StoreEncryptedKey stores a KMS-encrypted private key for an account
+func (db *DB) StoreEncryptedKey(ctx context.Context, accountID uuid.UUID, encryptedKey, kmsKeyID string) error {
+	now := time.Now().UTC()
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts
+		SET encrypted_private_key = $1, kms_key_id = $2, key_encrypted_at = $3, updated_at = $4
+		WHERE id = $5
+	`, encryptedKey, kmsKeyID, now, now, accountID)
+
+	if err != nil {
+		return fmt.Errorf("failed to store encrypted key: %w", err)
+	}
+
+	return nil
+}
+
+// GetEncryptedKey retrieves the KMS-encrypted private key for an account
+func (db *DB) GetEncryptedKey(ctx context.Context, accountID uuid.UUID) (string, error) {
+	var encryptedKey *string
+	err := db.QueryRow(ctx, `
+		SELECT encrypted_private_key
+		FROM accounts
+		WHERE id = $1
+	`, accountID).Scan(&encryptedKey)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errors.New("account not found")
+		}
+		return "", fmt.Errorf("failed to get encrypted key: %w", err)
+	}
+
+	if encryptedKey == nil {
+		return "", errors.New("no encrypted key stored for this account")
+	}
+
+	return *encryptedKey, nil
+}
+
+// HasEncryptedKey checks if an account has an encrypted private key stored
+func (db *DB) HasEncryptedKey(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	var hasKey bool
+	err := db.QueryRow(ctx, `
+		SELECT encrypted_private_key IS NOT NULL
+		FROM accounts
+		WHERE id = $1
+	`, accountID).Scan(&hasKey)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, errors.New("account not found")
+		}
+		return false, fmt.Errorf("failed to check encrypted key: %w", err)
+	}
+
+	return hasKey, nil
 }

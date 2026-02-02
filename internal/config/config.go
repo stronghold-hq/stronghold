@@ -30,6 +30,7 @@ type Config struct {
 	Stronghold  StrongholdConfig
 	Pricing     PricingConfig
 	RateLimit   RateLimitConfig
+	KMS         KMSConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -112,6 +113,12 @@ type RateLimitConfig struct {
 	RefreshMax    int
 }
 
+// KMSConfig holds AWS KMS configuration for wallet key encryption
+type KMSConfig struct {
+	Region string // AWS region (e.g., "us-east-1")
+	KeyID  string // KMS key ARN or alias (e.g., "alias/stronghold-wallet-keys")
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	// Default to production for security - explicit opt-in to development mode
@@ -181,6 +188,10 @@ func Load() *Config {
 			LoginMax:      getInt("RATE_LIMIT_LOGIN_MAX", 5),
 			AccountMax:    getInt("RATE_LIMIT_ACCOUNT_MAX", 3),
 			RefreshMax:    getInt("RATE_LIMIT_REFRESH_MAX", 10),
+		},
+		KMS: KMSConfig{
+			Region: getEnv("KMS_REGION", ""),
+			KeyID:  getEnv("KMS_KEY_ID", ""),
 		},
 	}
 }
@@ -276,6 +287,16 @@ func (c *Config) Validate() error {
 		if origin == "*" {
 			errs = append(errs, "DASHBOARD_ALLOWED_ORIGINS cannot contain wildcard '*' (credentials are enabled)")
 			break
+		}
+	}
+
+	// KMS is required in production for wallet key encryption
+	if c.Environment == EnvProduction {
+		if c.KMS.Region == "" {
+			errs = append(errs, "KMS_REGION is required in production")
+		}
+		if c.KMS.KeyID == "" {
+			errs = append(errs, "KMS_KEY_ID is required in production")
 		}
 	}
 

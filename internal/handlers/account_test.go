@@ -44,7 +44,7 @@ func setupAccountTest(t *testing.T) (*fiber.App, *AuthHandler, *AccountHandler, 
 		},
 	}
 
-	authHandler := NewAuthHandler(database, authConfig)
+	authHandler := NewAuthHandler(database, authConfig, nil) // nil KMS client for tests
 	accountHandler := NewAccountHandler(database, authConfig, nil)
 
 	app := fiber.New()
