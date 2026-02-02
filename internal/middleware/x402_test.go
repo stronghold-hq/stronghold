@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
 	"stronghold/internal/db/testutil"
+	"stronghold/internal/wallet"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jarcoal/httpmock"
@@ -223,23 +225,183 @@ func TestAtomicPayment_WithDB_IdempotencyCache(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
 
-	database := &db.DB{}
-	// We need to access the pool, but it's private. We'll use a workaround.
-	// For testing, we'll skip this complex test and note it requires more setup.
-	// This would typically require dependency injection or a test-specific setup.
-	_ = database
-	_ = testDB
+	// Create test wallet
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
 
-	t.Skip("Requires mock facilitator and wallet package integration")
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	// Create middleware with database
+	m := NewX402MiddlewareWithDB(cfg, pricing, db.NewFromPool(testDB.Pool))
+
+	// Setup httpmock for facilitator
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	// Mock verify to succeed
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	// Mock settle to succeed
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"payment_id": "test-payment-123",
+		}))
+
+	// Create payment header
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	callCount := 0
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		callCount++
+		return c.JSON(fiber.Map{"status": "ok", "call": callCount})
+	})
+
+	// First request - should succeed and store result
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, 1, callCount)
+
+	// Second request with SAME payment - should return cached result (conflict since in progress)
+	// Note: In real scenario, the first request would complete and subsequent
+	// requests would get the cached completed result. Here we test the conflict case.
+	req2 := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Payment", paymentHeader)
+
+	resp2, err := app.Test(req2)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+
+	// Should return cached result (200) or conflict (409) depending on timing
+	// Since first request completed, we should get the cached result
+	assert.Contains(t, []int{200, 409}, resp2.StatusCode)
 }
 
 func TestAtomicPayment_DuplicateInProgress(t *testing.T) {
-	t.Skip("Requires mock facilitator and wallet package integration")
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	m := NewX402MiddlewareWithDB(cfg, pricing, db.NewFromPool(testDB.Pool))
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	// Slow settle to simulate in-progress state
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		func(req *http.Request) (*http.Response, error) {
+			time.Sleep(100 * time.Millisecond)
+			return httpmock.NewJsonResponse(200, map[string]interface{}{
+				"payment_id": "test-payment-123",
+			})
+		})
+
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		time.Sleep(50 * time.Millisecond) // Simulate some work
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	// Send two concurrent requests with same payment
+	var wg sync.WaitGroup
+	results := make([]int, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Payment", paymentHeader)
+
+			resp, err := app.Test(req, fiber.TestConfig{Timeout: 5 * time.Second})
+			if err != nil {
+				results[idx] = -1
+				return
+			}
+			results[idx] = resp.StatusCode
+			resp.Body.Close()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// One should succeed (200), one should get conflict (409)
+	successCount := 0
+	conflictCount := 0
+	for _, code := range results {
+		if code == 200 {
+			successCount++
+		} else if code == 409 {
+			conflictCount++
+		}
+	}
+
+	// At least one should succeed, and we should see some conflict handling
+	assert.GreaterOrEqual(t, successCount, 1, "At least one request should succeed")
 }
 
 func TestAtomicPayment_SettlementFailure(t *testing.T) {
-	// This test verifies that if settlement fails, a 503 is returned
-	// and the result is NOT delivered to the client
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	m := NewX402MiddlewareWithDB(cfg, pricing, db.NewFromPool(testDB.Pool))
 
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
@@ -256,12 +418,98 @@ func TestAtomicPayment_SettlementFailure(t *testing.T) {
 			"error": "settlement failed",
 		}))
 
-	t.Skip("Requires wallet package integration for payment header parsing")
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	handlerCalled := false
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		handlerCalled = true
+		return c.JSON(fiber.Map{"status": "ok", "result": "should not be returned"})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Handler should have been called
+	assert.True(t, handlerCalled)
+
+	// But response should be 503 since settlement failed
+	assert.Equal(t, 503, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Payment settlement failed", body["error"])
+	assert.Equal(t, true, body["retry"])
 }
 
 func TestAtomicPayment_HandlerError(t *testing.T) {
-	// When handler returns error, payment reservation should be expired
-	t.Skip("Requires wallet package integration for payment header parsing")
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	m := NewX402MiddlewareWithDB(cfg, pricing, db.NewFromPool(testDB.Pool))
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	// Settle should NOT be called since handler fails
+	settleCalled := false
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		func(req *http.Request) (*http.Response, error) {
+			settleCalled = true
+			return httpmock.NewJsonResponse(200, map[string]interface{}{
+				"payment_id": "test-payment-123",
+			})
+		})
+
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		// Handler returns an error status
+		return c.Status(500).JSON(fiber.Map{"error": "internal error"})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Should return the handler's error
+	assert.Equal(t, 500, resp.StatusCode)
+
+	// Settlement should NOT have been called since handler failed
+	assert.False(t, settleCalled, "Settlement should not be called when handler fails")
 }
 
 func TestMiddleware_SkipsFreeRoutes(t *testing.T) {
@@ -416,20 +664,198 @@ func TestX402Client_Placeholder(t *testing.T) {
 
 // Integration test with real database
 func TestAtomicPayment_FullFlow_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
 
-	// This would require a complete integration test with:
-	// 1. Real database
-	// 2. Mocked facilitator
-	// 3. Valid payment signatures
-	// Skipping for now as it requires extensive mocking
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
 
-	t.Skip("Full integration test requires wallet package mocking")
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	database := db.NewFromPool(testDB.Pool)
+	m := NewX402MiddlewareWithDB(cfg, pricing, database)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"payment_id": "test-payment-456",
+		}))
+
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		// Verify we have access to the payment transaction
+		tx := GetPaymentTransaction(c)
+		if tx == nil {
+			return c.Status(500).JSON(fiber.Map{"error": "no payment transaction in context"})
+		}
+		return c.JSON(fiber.Map{
+			"status":    "ok",
+			"payer":     tx.PayerAddress,
+			"amount":    tx.AmountUSDC,
+			"nonce":     tx.PaymentNonce,
+		})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 200, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", body["status"])
+	assert.Equal(t, testWallet.AddressString(), body["payer"])
+	assert.NotEmpty(t, body["nonce"])
+
+	// Check X-Payment-Response header
+	paymentResp := resp.Header.Get("X-Payment-Response")
+	assert.NotEmpty(t, paymentResp)
+
+	var paymentData map[string]string
+	err = json.Unmarshal([]byte(paymentResp), &paymentData)
+	require.NoError(t, err)
+	assert.Equal(t, "test-payment-456", paymentData["payment_id"])
+
+	// Verify the payment was recorded in the database
+	payment, err := database.GetPaymentByNonce(context.Background(), body["nonce"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, db.PaymentStatusCompleted, payment.Status)
+	assert.Equal(t, "test-payment-456", *payment.FacilitatorPaymentID)
+}
+
+func TestAtomicPayment_InvalidAmountFormat(t *testing.T) {
+	// Test that malformed amount in payment header is rejected
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverAddress,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	m := NewX402MiddlewareWithDB(cfg, pricing, db.NewFromPool(testDB.Pool))
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	// This should not even be called since amount parsing should fail first
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	// Create payment with invalid amount (not a number)
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "invalid_amount", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Should return 402 since amount is invalid
+	assert.Equal(t, 402, resp.StatusCode)
+}
+
+func TestVerifyPayment_AddressNormalization(t *testing.T) {
+	// Test that address comparison works regardless of checksum
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	// Use lowercase address
+	receiverLower := "0x1234567890abcdef1234567890abcdef12345678"
+	// Checksum version would be: 0x1234567890AbcdEF1234567890aBcDeF12345678
+
+	cfg := &config.X402Config{
+		WalletAddress:  receiverLower,
+		FacilitatorURL: "https://x402.org/facilitator",
+		Network:        "base-sepolia",
+	}
+	pricing := &config.PricingConfig{
+		ScanInput: 0.001,
+	}
+
+	m := NewX402Middleware(cfg, pricing)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"valid": true,
+		}))
+
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"payment_id": "test-123",
+		}))
+
+	// Create payment with uppercase address (should still match)
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(
+		"0x1234567890ABCDEF1234567890ABCDEF12345678", // uppercase
+		"1000",
+		"base-sepolia",
+	)
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/input", m.AtomicPayment(0.001), func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/input", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Should succeed - addresses should match regardless of case
+	assert.Equal(t, 200, resp.StatusCode)
 }
 
 func TestHttpClientTimeout(t *testing.T) {

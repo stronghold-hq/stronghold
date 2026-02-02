@@ -44,6 +44,12 @@ func LoadConfig() *Config {
 	}
 }
 
+// NewFromPool creates a DB instance from an existing connection pool.
+// This is primarily useful for testing.
+func NewFromPool(pool *pgxpool.Pool) *DB {
+	return &DB{pool: pool}
+}
+
 // New creates a new database connection pool
 func New(cfg *Config) (*DB, error) {
 	connString := fmt.Sprintf(
