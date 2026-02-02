@@ -181,13 +181,38 @@ func TestFloat64ToWei(t *testing.T) {
 		amount   float64
 		expected string
 	}{
-		{0.001, "1000000000"}, // 0.001 * 1e6 * 1e6 = 1e9
-		{0.01, "10000000000"},
-		{1.0, "1000000000000"},
+		{0.001, "1000"},    // $0.001 = 1000 USDC atomic units (6 decimals)
+		{0.01, "10000"},    // $0.01 = 10000 units
+		{1.0, "1000000"},   // $1.00 = 1000000 units
+		{0.000001, "1"},    // Smallest unit = $0.000001
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.expected, func(t *testing.T) {
+			result := float64ToWei(tc.amount)
+			assert.Equal(t, tc.expected, result.String())
+		})
+	}
+}
+
+func TestFloat64ToWei_Precision(t *testing.T) {
+	// Test edge cases that could cause precision loss with int64 conversion
+	testCases := []struct {
+		name     string
+		amount   float64
+		expected string
+	}{
+		{"very small amount", 0.0000001, "0"},  // Below USDC precision
+		{"one cent", 0.01, "10000"},
+		{"one dollar", 1.0, "1000000"},
+		{"large amount", 1000000.0, "1000000000000"},
+		{"fractional precision", 0.123456, "123456"},
+		{"nine cents", 0.09, "90000"},          // Potential float representation issue
+		{"nineteen cents", 0.19, "190000"},     // Another common float issue
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
 			result := float64ToWei(tc.amount)
 			assert.Equal(t, tc.expected, result.String())
 		})

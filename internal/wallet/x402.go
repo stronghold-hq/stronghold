@@ -262,7 +262,8 @@ func ParseX402Payment(paymentHeader string) (*X402Payload, error) {
 
 func generateNonce() (string, error) {
 	// Generate a cryptographically secure random nonce
-	b := make([]byte, 16)
+	// Use 32 bytes (256 bits) to reduce birthday collision risk at scale
+	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}

@@ -14,8 +14,8 @@ import (
 	"stronghold/internal/db"
 	"stronghold/internal/wallet"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gofiber/fiber/v3"
-	"github.com/jackc/pgx/v5"
 )
 
 // X402Middleware creates x402 payment verification middleware
@@ -125,12 +125,39 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 			return m.requirePaymentResponse(c, priceWei)
 		}
 
-		// Idempotency check - return cached result if payment already completed
+		// Verify payment with facilitator first (before database operations)
+		valid, err := m.verifyPayment(paymentHeader, priceWei)
+		if err != nil || !valid {
+			return m.requirePaymentResponse(c, priceWei)
+		}
+
+		// Reserve payment in database using atomic upsert to prevent TOCTOU race conditions
+		var paymentTx *db.PaymentTransaction
 		if m.db != nil {
-			existing, err := m.db.GetPaymentByNonce(c.Context(), payload.Nonce)
-			if err == nil && existing != nil {
+			newTx := &db.PaymentTransaction{
+				PaymentNonce:    payload.Nonce,
+				PaymentHeader:   paymentHeader,
+				PayerAddress:    payload.Payer,
+				ReceiverAddress: m.config.WalletAddress,
+				Endpoint:        c.Path(),
+				AmountUSDC:      price,
+				Network:         payload.Network,
+				ExpiresAt:       time.Now().Add(5 * time.Minute),
+			}
+
+			// Atomic upsert - either creates new or returns existing transaction
+			existing, wasCreated, err := m.db.CreateOrGetPaymentTransaction(c.Context(), newTx)
+			if err != nil {
+				slog.Error("failed to create/get payment transaction", "error", err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Payment processing error",
+				})
+			}
+
+			if !wasCreated {
+				// Transaction already exists - handle based on status
 				if existing.Status == db.PaymentStatusCompleted && existing.ServiceResult != nil {
-					// Return cached result
+					// Return cached result (idempotent replay)
 					if existing.FacilitatorPaymentID != nil {
 						m.PaymentResponse(c, *existing.FacilitatorPaymentID)
 					}
@@ -144,38 +171,14 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 						"status": string(existing.Status),
 					})
 				}
-			} else if err != nil && err != pgx.ErrNoRows {
-				slog.Error("error checking payment nonce", "error", err)
-			}
-		}
-
-		// Verify payment with facilitator
-		valid, err := m.verifyPayment(paymentHeader, priceWei)
-		if err != nil || !valid {
-			return m.requirePaymentResponse(c, priceWei)
-		}
-
-		// Reserve payment in database
-		var paymentTx *db.PaymentTransaction
-		if m.db != nil {
-			paymentTx = &db.PaymentTransaction{
-				PaymentNonce:    payload.Nonce,
-				PaymentHeader:   paymentHeader,
-				PayerAddress:    payload.Payer,
-				ReceiverAddress: m.config.WalletAddress,
-				Endpoint:        c.Path(),
-				AmountUSDC:      price,
-				Network:         payload.Network,
-				ExpiresAt:       time.Now().Add(5 * time.Minute),
-			}
-
-			if err := m.db.CreatePaymentTransaction(c.Context(), paymentTx); err != nil {
-				// If nonce already exists, this is a duplicate request
-				slog.Error("failed to create payment transaction", "error", err)
+				// Expired payment - allow retry with new transaction
+				// This shouldn't happen often as we just tried to create one
 				return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-					"error": "Duplicate payment nonce",
+					"error": "Payment nonce expired, please generate a new payment",
 				})
 			}
+
+			paymentTx = existing
 
 			// Transition to executing
 			if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusReserved, db.PaymentStatusExecuting); err != nil {
@@ -281,13 +284,19 @@ func (m *X402Middleware) verifyPayment(paymentHeader string, expectedAmount *big
 
 	// Verify the amount matches
 	amount := new(big.Int)
-	amount.SetString(payload.Amount, 10)
+	if _, ok := amount.SetString(payload.Amount, 10); !ok {
+		return false, fmt.Errorf("invalid amount format: %s", payload.Amount)
+	}
 	if amount.Cmp(expectedAmount) != 0 {
 		return false, fmt.Errorf("amount mismatch: expected %s, got %s", expectedAmount.String(), payload.Amount)
 	}
 
 	// Verify the recipient is our wallet
-	if !strings.EqualFold(payload.Receiver, m.config.WalletAddress) {
+	// Use Ethereum address normalization rather than case-insensitive comparison
+	// to properly handle checksummed addresses
+	expectedAddr := common.HexToAddress(m.config.WalletAddress)
+	receivedAddr := common.HexToAddress(payload.Receiver)
+	if expectedAddr != receivedAddr {
 		return false, fmt.Errorf("recipient mismatch: expected %s, got %s", m.config.WalletAddress, payload.Receiver)
 	}
 
@@ -421,12 +430,16 @@ func (m *X402Middleware) PaymentResponse(c fiber.Ctx, paymentID string) {
 	c.Set("X-Payment-Response", string(responseJSON))
 }
 
-// float64ToWei converts a dollar amount to wei (6 decimals for USDC)
+// float64ToWei converts a dollar amount to USDC atomic units (6 decimals)
+// For example: $0.001 -> 1000 units, $1.00 -> 1000000 units
+// Uses big.Float for precision to avoid float64 truncation issues
 func float64ToWei(amount float64) *big.Int {
-	// USDC has 6 decimals
-	multiplier := big.NewInt(1_000_000)
-	amountInt := big.NewInt(int64(amount * 1_000_000))
-	return new(big.Int).Mul(amountInt, multiplier)
+	// USDC has 6 decimals, so multiply by 10^6
+	// Use big.Float to avoid precision loss in edge cases
+	bf := big.NewFloat(amount)
+	bf.Mul(bf, big.NewFloat(1_000_000))
+	result, _ := bf.Int(nil)
+	return result
 }
 
 // IsFreeRoute checks if a route doesn't require payment

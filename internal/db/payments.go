@@ -73,6 +73,51 @@ func (db *DB) CreatePaymentTransaction(ctx context.Context, tx *PaymentTransacti
 	return nil
 }
 
+// CreateOrGetPaymentTransaction atomically creates a payment transaction or returns an existing one.
+// This prevents TOCTOU race conditions where concurrent requests with the same nonce
+// could both pass the existence check and then one would fail on insert.
+// Returns (transaction, wasCreated, error) where wasCreated is true if a new transaction was inserted.
+func (db *DB) CreateOrGetPaymentTransaction(ctx context.Context, tx *PaymentTransaction) (*PaymentTransaction, bool, error) {
+	// Use INSERT ... ON CONFLICT DO NOTHING and then check if we got an ID back
+	// If no ID returned, the row already existed and we need to fetch it
+	query := `
+		INSERT INTO payment_transactions (
+			payment_nonce, payment_header, payer_address, receiver_address,
+			endpoint, amount_usdc, network, status, expires_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (payment_nonce) DO NOTHING
+		RETURNING id, created_at
+	`
+
+	err := db.pool.QueryRow(ctx, query,
+		tx.PaymentNonce,
+		tx.PaymentHeader,
+		tx.PayerAddress,
+		tx.ReceiverAddress,
+		tx.Endpoint,
+		tx.AmountUSDC,
+		tx.Network,
+		PaymentStatusReserved,
+		tx.ExpiresAt,
+	).Scan(&tx.ID, &tx.CreatedAt)
+
+	if err != nil {
+		// No rows returned means the nonce already exists
+		if err.Error() == "no rows in result set" {
+			// Fetch the existing transaction
+			existing, fetchErr := db.GetPaymentByNonce(ctx, tx.PaymentNonce)
+			if fetchErr != nil {
+				return nil, false, fmt.Errorf("failed to fetch existing payment: %w", fetchErr)
+			}
+			return existing, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to create payment transaction: %w", err)
+	}
+
+	tx.Status = PaymentStatusReserved
+	return tx, true, nil
+}
+
 // GetPaymentByNonce retrieves a payment transaction by its nonce (idempotency key)
 func (db *DB) GetPaymentByNonce(ctx context.Context, nonce string) (*PaymentTransaction, error) {
 	query := `
@@ -248,6 +293,7 @@ func (db *DB) FailSettlement(ctx context.Context, id uuid.UUID, errorMsg string)
 }
 
 // GetPendingSettlements returns payments that need settlement retry
+// This includes both failed payments and payments stuck in settling state for too long
 func (db *DB) GetPendingSettlements(ctx context.Context, maxAttempts int, limit int) ([]*PaymentTransaction, error) {
 	query := `
 		SELECT id, payment_nonce, payment_header, payer_address, receiver_address,
@@ -255,13 +301,14 @@ func (db *DB) GetPendingSettlements(ctx context.Context, maxAttempts int, limit 
 			   settlement_attempts, last_error, service_result,
 			   created_at, executed_at, settled_at, expires_at
 		FROM payment_transactions
-		WHERE status = $1 AND settlement_attempts < $2
+		WHERE (status = $1 AND settlement_attempts < $2)
+		   OR (status = $3 AND executed_at < NOW() - INTERVAL '5 minutes')
 		ORDER BY created_at ASC
-		LIMIT $3
+		LIMIT $4
 		FOR UPDATE SKIP LOCKED
 	`
 
-	rows, err := db.pool.Query(ctx, query, PaymentStatusFailed, maxAttempts, limit)
+	rows, err := db.pool.Query(ctx, query, PaymentStatusFailed, maxAttempts, PaymentStatusSettling, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pending settlements: %w", err)
 	}

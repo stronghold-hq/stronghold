@@ -90,21 +90,26 @@ internal/
 - Tests require Docker to be running (testcontainers spins up PostgreSQL)
 - If Docker is not available, tests will be SKIPPED - this is NOT the same as passing
 - **Never proceed with a commit if tests are skipped due to missing infrastructure**
-- If you see "Docker is not available, skipping test" - STOP and fix Docker first
-- Run `docker info` to verify Docker is available before running tests
+- If you see "Docker is not available, skipping test" - STOP and start Docker first
 - Pre-existing test failures must be noted and either fixed or explicitly acknowledged by the user
 
 ```bash
+# FIRST: Ensure Docker is running (MANDATORY before running tests)
+sudo systemctl start docker
+
 # Verify Docker is running
 docker info
 
 # Run all tests (requires Docker)
 go test ./...
 
-# If tests skip, install/start Docker first:
-# Arch: sudo pacman -S docker && sudo systemctl start docker
+# If Docker service doesn't exist, install it first:
+# Arch: sudo pacman -S docker
+# Ubuntu/Debian: sudo apt install docker.io
 # Then add user to docker group: sudo usermod -aG docker $USER && newgrp docker
 ```
+
+**DO NOT use `-short` flag** - this skips important integration tests. Always run the full test suite.
 
 ## Database
 

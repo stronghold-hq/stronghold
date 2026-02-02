@@ -67,6 +67,11 @@ func NewScannerClient(baseURL, token string) *ScannerClient {
 		token:   token,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			// Don't follow redirects to prevent payment headers from being sent
+			// to attacker-controlled URLs via redirect chains
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		facilitatorURL: "https://x402.org/facilitator",
 	}
