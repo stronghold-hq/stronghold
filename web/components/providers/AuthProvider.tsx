@@ -2,8 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-const API_URL = rawApiUrl.trim();
+const API_URL = 'https://stronghold-api.fly.dev';
 
 interface Account {
   id: string;
