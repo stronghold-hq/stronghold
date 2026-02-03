@@ -1,0 +1,41 @@
+<svg width="80" height="80" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer fortress wall - octagonal -->
+  <path
+    d="M24 2L42 12V36L24 46L6 36V12L24 2Z"
+    stroke="#00D4AA"
+    stroke-width="2"
+    fill="none"
+  />
+
+  <!-- Inner keep - smaller octagon -->
+  <path
+    d="M24 14L32 18V30L24 34L16 30V18L24 14Z"
+    stroke="#00D4AA"
+    stroke-width="1.5"
+    fill="rgba(0, 212, 170, 0.1)"
+  />
+
+  <!-- Center shield -->
+  <path
+    d="M24 18C24 18 28 20 28 24C28 28 24 32 24 32C24 32 20 28 20 24C20 20 24 18 24 18Z"
+    fill="#00D4AA"
+  />
+
+  <!-- Corner battlements -->
+  <g stroke="#00D4AA" stroke-width="1.5" stroke-linecap="round">
+    <line x1="6" y1="12" x2="6" y2="8" />
+    <line x1="42" y1="12" x2="42" y2="8" />
+    <line x1="6" y1="36" x2="6" y2="40" />
+    <line x1="42" y1="36" x2="42" y2="40" />
+  </g>
+
+  <!-- Glow effect -->
+  <circle cx="24" cy="24" r="20" fill="url(#glow)" opacity="0.3" />
+
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#00D4AA" stop-opacity="0.4" />
+      <stop offset="1" stop-color="#00D4AA" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+</svg>

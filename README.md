@@ -1,83 +1,139 @@
-# Stronghold
+<p align="center">
+  <img src="assets/logo.svg" width="80" alt="Stronghold">
+</p>
 
-Protect AI agents from prompt injection attacks and credential leaks.
+<h1 align="center">Stronghold</h1>
 
-## The Problem
+<p align="center">
+  <strong>Enterprise Security for AI Infrastructure</strong>
+</p>
 
-AI agents that read external content are vulnerable to prompt injection attacks. When an agent fetches a webpage, email, or API response, that content may contain malicious instructions designed to hijack the agent's behavior.
+<p align="center">
+  Protect AI agents from prompt injection attacks and credential leaks.<br>
+  Stronghold intercepts and scans all traffic through a transparent proxy, blocking threats before they reach your models.
+</p>
 
+<p align="center">
+  A pay-per-request security API built on the <a href="https://github.com/citadel-ai/citadel">Citadel AI security scanner</a> with <a href="https://www.x402.org/">x402</a> payment protocol integration.
+</p>
+
+<p align="center">
+  <a href="https://github.com/yv-was-taken/stronghold/actions"><img src="https://img.shields.io/github/actions/workflow/status/yv-was-taken/stronghold/test.yml?branch=master&label=tests" alt="Tests"></a>
+  <a href="https://goreportcard.com/report/github.com/yv-was-taken/stronghold"><img src="https://goreportcard.com/badge/github.com/yv-was-taken/stronghold" alt="Go Report Card"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go 1.24+"></a>
+  <a href="https://github.com/yv-was-taken/stronghold/releases"><img src="https://img.shields.io/github/v/release/yv-was-taken/stronghold" alt="Release"></a>
+  <a href="https://github.com/yv-was-taken/stronghold/blob/master/LICENSE"><img src="https://img.shields.io/github/license/yv-was-taken/stronghold" alt="License"></a>
+</p>
+
+<br>
+
+## Quick Start
+
+```bash
+curl -fsSL https://install.stronghold.security | sh
+stronghold doctor
+sudo stronghold init
+sudo stronghold enable
 ```
-1. Attacker embeds instructions: "Ignore previous instructions..."
-2. Agent fetches content (webpage, email, document)
-3. Agent reads malicious content into its context
-4. Agent follows attacker's instructions instead of user's
-```
 
-## Two-Way Protection
-
-Stronghold protects both directions of data flow:
-
-```
-External content → [PROXY scans] → Agent → [API scans] → Output to user
-                    ↑                        ↑
-                 Injection               Credential leaks
-                 (INCOMING)              (OUTGOING)
-```
-
-**Proxy** scans INCOMING content — blocks prompt injection before the agent sees it
-**API** scans OUTGOING content — catches credential leaks in agent responses
-
-Both require an account with USDC balance. $0.001 per scan.
+All HTTP/HTTPS traffic is now routed through the transparent proxy for real-time security scanning.
 
 ---
 
-## 1. Transparent Proxy (Incoming Content)
+## Features
 
-The proxy intercepts ALL HTTP/HTTPS traffic at the network level, scanning content **before** it reaches your AI agents.
+- **Multi-Layer Detection**: Four-layer scanning pipeline (heuristics, ML classification, semantic similarity, and optional LLM classification) delivers sub-50ms latency
+- **Network-Level Protection**: Transparent proxy intercepts traffic at the kernel level, blocking threats before they reach your models
+- **Bidirectional Scanning**: Detects prompt injection on inbound content and credential leaks on outbound responses
+- **Pay-Per-Request Pricing**: $0.001 per scan via x402 protocol using USDC on Base, with no API keys or subscriptions required
+- **Open Source**: MIT licensed and fully self-hostable
+
+---
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [CLI Reference](#cli-reference)
+- [API Endpoints](#api-endpoints)
+- [Account & Funding](#account--funding)
+- [x402 Payment Flow](#x402-payment-flow)
+- [Deployment](#deployment)
+- [Project Structure](#project-structure)
+- [License](#license)
+
+---
+
+## How It Works
+
+Stronghold operates at the network level, scanning all content before it reaches the AI agent.
 
 ### Why Network-Level Protection?
 
-Traditional security that requires the agent to call an API has a fundamental flaw:
+Traditional security approaches require the agent to invoke a scanning API. However, to make that call, the agent must first read the content into its context window. At that point, prompt injection can already influence the agent's behavior, causing it to ignore scan results or fail to invoke the security API entirely.
 
-- To call a security API, the agent must first **READ** the content
-- At that moment, prompt injection can already affect the agent
-- The agent might "forget" to call the API or ignore the result
-- The attack has already succeeded before any scan occurs
+The transparent proxy architecture eliminates this vulnerability:
 
-The transparent proxy solves this by operating **outside** the agent's cognition:
+- Content is scanned before the agent receives it
+- Malicious content is blocked at the kernel level
+- Agents never process threats they cannot observe
+- Protection cannot be bypassed by prompt injection
 
-- Content is scanned **before** the agent receives it
-- Malicious content is blocked at the network level
-- The agent never processes threats it cannot see
-- **Cannot be bypassed by prompt injection**
+### Architecture
 
-### Quick Start
-
-```bash
-# Check if your system is ready
-stronghold doctor
-
-# Install Stronghold (interactive setup)
-sudo stronghold init
-
-# Enable protection (starts transparent proxy)
-sudo stronghold enable
-
-# Check status
-stronghold status
-
-# Disable protection
-sudo stronghold disable
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Agent     │      │   Kernel    │      │  Stronghold │
+│  (any app)  │ ──▶  │  iptables   │ ──▶  │    Proxy    │
+└─────────────┘      │     pf      │      │ :8402       │
+                     └─────────────┘      └──────┬──────┘
+                                                 │
+                     ┌───────────────────────────┼───────────────────────────┐
+                     │                           ▼                           │
+                     │  ┌─────────────┐    ┌───────────┐    ┌─────────────┐  │
+                     │  │   Fetch     │ ─▶ │   Scan    │ ─▶ │   Return    │  │
+                     │  │   content   │    │   (API)   │    │   result    │  │
+                     │  └─────────────┘    └───────────┘    └─────────────┘  │
+                     │                                                       │
+                     │              ALLOW / WARN / BLOCK                     │
+                     └───────────────────────────────────────────────────────┘
 ```
 
-### Installation
+### Bidirectional Protection
 
-**One-line installer:**
+```
+                    ┌──────────────────┐
+ External Content   │                  │   Agent Output
+ (web, email, API)  │    AI  Agent     │   (to user)
+        │           │                  │        │
+        ▼           └──────────────────┘        ▼
+   ┌─────────┐                             ┌─────────┐
+   │  PROXY  │ ──── safe content ────────▶ │   API   │
+   │  SCAN   │                             │  SCAN   │
+   └─────────┘                             └─────────┘
+        │                                       │
+        ▼                                       ▼
+   Prompt injection                       Credential leak
+   detection                              detection
+```
+
+| Layer | Direction | Threat Detection |
+|-------|-----------|------------------|
+| Proxy | Inbound | Prompt injection attacks in external content |
+| API | Outbound | Credential leaks in agent responses |
+
+---
+
+## Installation
+
+### One-Line Installer
+
 ```bash
 curl -fsSL https://install.stronghold.security | sh
 ```
 
-**Or build from source:**
+### Build from Source
+
 ```bash
 git clone https://github.com/yv-was-taken/stronghold.git
 cd stronghold
@@ -85,76 +141,75 @@ go build -o stronghold ./cmd/cli
 go build -o stronghold-proxy ./cmd/proxy
 ```
 
-### Prerequisites
+### System Requirements
 
-- **OS**: Linux or macOS
-- **Privileges**: Root/sudo required for `install`, `enable`, `disable`
-- **Firewall**: iptables or nftables (Linux), pf (macOS) — usually pre-installed
-- **Keyring** (Linux only): One of the following must be installed:
-  - GNOME Keyring / Secret Service (`gnome-keyring`)
-  - KWallet (pre-installed on KDE)
-  - pass (`pass` password-store)
+- **Operating System**: Linux or macOS
+- **Privileges**: Root access required for `init`, `enable`, and `disable` commands
+- **Firewall**: iptables or nftables (Linux), pf (macOS)
+- **Keyring** (Linux only): gnome-keyring, KWallet, or pass
 
-Run `stronghold doctor` to verify your system meets all requirements.
-
-### CLI Commands
-
-| Command | Description | Requires Root |
-|---------|-------------|---------------|
-| `stronghold doctor` | Check system prerequisites | No |
-| `stronghold init` | Interactive installation | Yes |
-| `stronghold enable` | Start proxy and enable traffic interception | Yes |
-| `stronghold disable` | Stop proxy and restore direct access | Yes |
-| `stronghold status` | Show proxy status and statistics | No |
-| `stronghold logs` | View proxy logs | No |
-| `stronghold account balance` | Check your account balance | No |
-| `stronghold account deposit` | Show deposit options | No |
-| `stronghold wallet export` | Export private key for backup | No |
-| `stronghold wallet replace` | Replace wallet with a new private key | No |
-| `stronghold uninstall` | Remove Stronghold from system | Yes |
-
-### How It Works
-
-The transparent proxy uses **iptables/nftables** (Linux) or **pf** (macOS) to intercept traffic at the network level:
-
-```
-┌─────────────────────────────────────────────┐
-│  Agent makes HTTP request                   │
-│       │                                     │
-│       ▼                                     │
-│  Kernel intercepts (iptables/pf)            │
-│       │                                     │
-│       ▼                                     │
-│  Stronghold Proxy (localhost:8402)          │
-│       │                                     │
-│       ├── Fetches content from destination  │
-│       ├── Scans with Stronghold API         │
-│       └── Returns ALLOW/WARN/BLOCK          │
-│       │                                     │
-│       ▼                                     │
-│  Response returned to agent                 │
-└─────────────────────────────────────────────┘
-```
-
-**Key features:**
-- Cannot be bypassed by applications (unlike HTTP_PROXY env vars)
-- Works for all processes automatically
-- Adds `X-Stronghold-Decision` headers to responses
-- Blocks malicious content before agents see it
+Run `stronghold doctor` to verify that all system requirements are met.
 
 ---
 
-## 2. Output Scanning API (Outgoing Content)
+## CLI Reference
 
-The API scans agent responses **before** they're sent to users, catching accidentally exposed credentials.
+| Command | Description | Root Required |
+|---------|-------------|---------------|
+| `stronghold doctor` | Verify system requirements | No |
+| `stronghold init` | Initialize installation and configure wallet | Yes |
+| `stronghold enable` | Start proxy and enable traffic interception | Yes |
+| `stronghold disable` | Stop proxy and restore direct network access | Yes |
+| `stronghold status` | Display proxy status and statistics | No |
+| `stronghold logs` | View proxy logs | No |
+| `stronghold account balance` | Display current account balance | No |
+| `stronghold account deposit` | Display deposit options | No |
+| `stronghold wallet export` | Export private key for backup | No |
+| `stronghold wallet replace` | Replace wallet with a new private key | No |
+| `stronghold uninstall` | Remove Stronghold from the system | Yes |
 
-### POST /v1/scan/output — Credential Leak Detection
+---
 
-Use this to check agent output for accidentally exposed:
-- API keys and tokens
-- Passwords and secrets
-- Database connection strings
-- AWS credentials, private keys
+## API Endpoints
+
+### Public Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/health/live` | GET | Liveness probe for orchestration |
+| `/health/ready` | GET | Readiness probe for orchestration |
+| `/v1/pricing` | GET | Retrieve endpoint pricing |
+
+### Protected Endpoints
+
+Payment via x402 protocol is required for the following endpoints.
+
+| Endpoint | Method | Price | Description |
+|----------|--------|-------|-------------|
+| `/v1/scan/content` | POST | $0.001 | Prompt injection detection |
+| `/v1/scan/output` | POST | $0.001 | Credential leak detection |
+
+### POST /v1/scan/content
+
+Scans external content for prompt injection attacks. The transparent proxy invokes this endpoint automatically.
+
+> **Note**: Direct API integration is recommended only when the proxy cannot be deployed (e.g., serverless environments, sandboxed containers). The proxy provides stronger protection by scanning content before it enters the agent's context.
+
+```bash
+curl -X POST https://api.stronghold.security/v1/scan/content \
+  -H "Content-Type: application/json" \
+  -H "X-PAYMENT: x402;..." \
+  -d '{
+    "text": "external content to scan",
+    "source_url": "https://example.com",
+    "source_type": "web_page"
+  }'
+```
+
+### POST /v1/scan/output
+
+Scans agent responses for credential leaks before delivery to end users. Detects API keys, passwords, database connection strings, cloud provider credentials, and private keys.
 
 ```bash
 curl -X POST https://api.stronghold.security/v1/scan/output \
@@ -162,25 +217,6 @@ curl -X POST https://api.stronghold.security/v1/scan/output \
   -H "X-PAYMENT: x402;..." \
   -d '{
     "text": "Here is the config: DB_PASSWORD=secret123"
-  }'
-```
-
-### POST /v1/scan/content — Prompt Injection Detection
-
-> **⚠️ We strongly recommend using the transparent proxy instead.**
->
-> This endpoint scans text for prompt injection, but by the time you call it, your agent has already read the content. The proxy blocks threats **before** your agent sees them.
->
-> Use this endpoint only if you cannot install the proxy (serverless functions, sandboxed containers, etc.).
-
-```bash
-curl -X POST https://api.stronghold.security/v1/scan/content \
-  -H "Content-Type: application/json" \
-  -H "X-PAYMENT: x402;..." \
-  -d '{
-    "text": "external content here",
-    "source_url": "https://example.com",
-    "source_type": "web_page"
   }'
 ```
 
@@ -200,85 +236,60 @@ curl -X POST https://api.stronghold.security/v1/scan/content \
 }
 ```
 
-**Decisions:**
-- `ALLOW`: No threats detected, proceed
-- `WARN`: Elevated risk, review recommended
-- `BLOCK`: High risk, reject the request
+**Decision Values**:
+- `ALLOW`: No threats detected; content is safe to process
+- `WARN`: Elevated risk detected; manual review recommended
+- `BLOCK`: High-confidence threat detected; request should be rejected
 
 ---
 
-## 3. Account & Funding
+## Account & Funding
 
-Both the proxy and API require a funded account.
+Both the proxy and API require an account with a USDC balance.
 
-### Create an Account
+### Account Creation
 
-**Option 1: Dashboard**
-Visit https://stronghold.security/dashboard
+**Via Dashboard**: Visit https://stronghold.security/dashboard
 
-**Option 2: CLI**
-Run `sudo stronghold init` — the installer creates a local wallet and registers it.
+**Via CLI**: Run `sudo stronghold init` to create a local wallet and register it with the service.
 
-### Check Balance & Add Funds
+### Balance Management
 
 ```bash
-# Check your balance
-stronghold account balance
-
-# Add funds
-stronghold account deposit
+stronghold account balance    # Display current balance
+stronghold account deposit    # Display deposit options
 ```
 
-Deposit options:
-- **Dashboard**: Stripe, Coinbase Pay, or Moonpay (recommended)
-- **Direct**: Send USDC on Base to your account address
+### Deposit Methods
+
+- **Dashboard**: Stripe, Coinbase Pay, or Moonpay
+- **Direct Transfer**: Send USDC on Base to your account address
 
 ### Pricing
 
-| Endpoint | Price |
-|----------|-------|
+| Endpoint | Price per Request |
+|----------|-------------------|
 | `/v1/scan/content` | $0.001 |
 | `/v1/scan/output` | $0.001 |
 
-### Security Notes
+### Credential Security
 
-- Private keys never leave your device
-- Credentials stored in OS-native keyring (macOS Keychain, Linux Secret Service/KWallet/pass)
-- Only your account ID is shared with the backend for linking
-- Low balance warnings appear when below 1 USDC
-
----
-
-## API Reference
-
-### Public Endpoints (No Payment)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/health/live` | GET | Liveness probe |
-| `/health/ready` | GET | Readiness probe |
-| `/v1/pricing` | GET | List endpoint pricing |
-
-### Protected Endpoints (Payment Required)
-
-| Endpoint | Method | Price | Description |
-|----------|--------|-------|-------------|
-| `/v1/scan/content` | POST | $0.001 | Prompt injection detection |
-| `/v1/scan/output` | POST | $0.001 | Credential leak detection |
+- Private keys are stored locally and never transmitted to external services
+- Credentials are secured in the OS-native keyring (macOS Keychain, Linux Secret Service/KWallet/pass)
+- Only the public account identifier is shared with the backend for account linking
 
 ---
 
 ## x402 Payment Flow
 
-1. **Initial Request**: Client makes request without payment
-2. **402 Response**: Server returns payment requirements
-3. **Sign Payment**: Client signs EIP-712 payment authorization
-4. **Retry**: Client retries with `X-PAYMENT` header
-5. **Verify**: Server verifies payment via facilitator
-6. **Response**: Server returns scan result with `X-PAYMENT-RESPONSE`
+1. **Initial Request**: Client sends request without payment header
+2. **402 Response**: Server returns payment requirements in the response
+3. **Payment Signing**: Client signs an EIP-712 payment authorization
+4. **Authenticated Retry**: Client retries request with `X-PAYMENT` header
+5. **Payment Verification**: Server verifies payment via the x402 facilitator
+6. **Response Delivery**: Server returns scan result with `X-PAYMENT-RESPONSE` header
 
-### Client Integration Example
+### Client Integration
 
 ```javascript
 import { x402Client } from "x402-fetch";
@@ -288,7 +299,7 @@ const fetchWithPayment = x402Client({
   network: "base"
 });
 
-// Scan output for credential leaks before sending to user
+// Scan agent output before delivery to the end user
 const result = await fetchWithPayment(
   "https://api.stronghold.security/v1/scan/output",
   {
@@ -308,44 +319,24 @@ if (scanResult.decision === "BLOCK") {
 
 ## Deployment
 
-### Fly.io (Recommended)
+### Fly.io
 
 ```bash
-# Install Fly CLI
-curl -L https://fly.io/install.sh | sh
 fly auth login
-
-# Launch the app
-git clone https://github.com/yv-was-taken/stronghold.git
-cd stronghold
+git clone https://github.com/yv-was-taken/stronghold.git && cd stronghold
 fly launch --name stronghold-api --region iad
-
-# Set secrets
 fly secrets set X402_WALLET_ADDRESS=0xYOUR_WALLET_ADDRESS
-fly secrets set X402_NETWORK=base
-
-# Deploy
 fly deploy
 ```
 
 ### Docker Compose
 
 ```bash
-git clone https://github.com/yv-was-taken/stronghold.git
-cd stronghold
-
-# Create environment file
-cat > .env << 'EOF'
-X402_WALLET_ADDRESS=0xYOUR_WALLET_ADDRESS
-X402_NETWORK=base
-STRONGHOLD_ENABLE_HUGOT=true
-STRONGHOLD_ENABLE_SEMANTICS=true
-EOF
-
-# Build and start
+git clone https://github.com/yv-was-taken/stronghold.git && cd stronghold
+cp .env.example .env  # Configure environment variables
 docker-compose up -d
 
-# With reverse proxy (Caddy for HTTPS)
+# With HTTPS via Caddy reverse proxy
 docker-compose --profile with-proxy up -d
 ```
 
@@ -354,13 +345,13 @@ docker-compose --profile with-proxy up -d
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `X402_WALLET_ADDRESS` | Yes* | - | USDC receiving address |
-| `X402_NETWORK` | No | `base` | `base` or `base-sepolia` |
-| `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification |
-| `STRONGHOLD_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity |
-| `STRONGHOLD_BLOCK_THRESHOLD` | No | `0.55` | Score threshold for BLOCK |
-| `STRONGHOLD_WARN_THRESHOLD` | No | `0.35` | Score threshold for WARN |
+| `X402_NETWORK` | No | `base` | Network identifier: `base` or `base-sepolia` |
+| `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification layer |
+| `STRONGHOLD_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity layer |
+| `STRONGHOLD_BLOCK_THRESHOLD` | No | `0.55` | Score threshold for BLOCK decisions |
+| `STRONGHOLD_WARN_THRESHOLD` | No | `0.35` | Score threshold for WARN decisions |
 
-*If `X402_WALLET_ADDRESS` is not set, the server runs in development mode without payments.
+*When `X402_WALLET_ADDRESS` is not configured, the server runs in development mode without payment verification.
 
 ---
 
@@ -369,22 +360,31 @@ docker-compose --profile with-proxy up -d
 ```
 .
 ├── cmd/
-│   ├── api/main.go              # API server entry point
-│   ├── cli/main.go              # CLI client entry point
-│   └── proxy/main.go            # Proxy daemon entry point
+│   ├── api/           # API server entry point
+│   ├── cli/           # CLI client entry point
+│   └── proxy/         # Proxy daemon entry point
 ├── internal/
-│   ├── server/server.go         # HTTP server setup
-│   ├── handlers/                # API endpoints
-│   ├── middleware/x402.go       # Payment middleware
-│   ├── stronghold/client.go     # Scanner wrapper
-│   ├── wallet/                  # Wallet management
-│   ├── cli/                     # CLI implementation
-│   └── proxy/                   # Proxy implementation
-├── web/                         # Frontend (Next.js)
-├── Dockerfile
-├── docker-compose.yml
-└── install.sh                   # One-line installer
+│   ├── server/        # HTTP server setup
+│   ├── handlers/      # API endpoint handlers
+│   ├── middleware/    # x402 payment verification
+│   ├── stronghold/    # Citadel scanner integration
+│   ├── wallet/        # Wallet management
+│   ├── cli/           # CLI implementation
+│   └── proxy/         # Proxy implementation
+├── web/               # Frontend (Next.js)
+└── install.sh         # One-line installer script
 ```
+
+---
+
+## Built With
+
+- [Citadel](https://github.com/citadel-ai/citadel) - AI security scanner with multi-layer threat detection
+- [x402](https://www.x402.org/) - HTTP 402 payment protocol on Base
+- [Fiber](https://gofiber.io/) - High-performance HTTP framework for Go
+- [Bubbletea](https://github.com/charmbracelet/bubbletea) - Terminal UI framework for the CLI
+
+---
 
 ## License
 
