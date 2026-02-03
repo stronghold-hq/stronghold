@@ -106,14 +106,14 @@ export function StatsCards({ stats, loading }: StatsCardsProps) {
         icon={<Activity className="w-5 h-5 text-[#00D4AA]" />}
         iconBg="bg-[#00D4AA]/10"
         label="Total Requests"
-        value={stats.total_requests.toLocaleString()}
-        subLabel={`Last ${stats.period_days} days`}
+        value={(stats.total_requests ?? 0).toLocaleString()}
+        subLabel={`Last ${stats.period_days ?? 30} days`}
       />
       <StatCard
         icon={<DollarSign className="w-5 h-5 text-blue-400" />}
         iconBg="bg-blue-500/10"
         label="Total Cost"
-        value={`$${formatUSDC(stats.total_cost_usdc)}`}
+        value={`$${formatUSDC(stats.total_cost_usdc ?? 0)}`}
         subLabel="USDC"
         delay={0.05}
       />
@@ -121,7 +121,7 @@ export function StatsCards({ stats, loading }: StatsCardsProps) {
         icon={<Shield className="w-5 h-5 text-red-400" />}
         iconBg="bg-red-500/10"
         label="Threats Detected"
-        value={stats.threats_detected.toLocaleString()}
+        value={(stats.threats_detected ?? 0).toLocaleString()}
         subLabel="Blocked"
         delay={0.1}
       />
@@ -129,7 +129,7 @@ export function StatsCards({ stats, loading }: StatsCardsProps) {
         icon={<Clock className="w-5 h-5 text-yellow-400" />}
         iconBg="bg-yellow-500/10"
         label="Avg Latency"
-        value={`${Math.round(stats.avg_latency_ms)}ms`}
+        value={`${Math.round(stats.avg_latency_ms ?? 0)}ms`}
         subLabel="Response time"
         delay={0.15}
       />

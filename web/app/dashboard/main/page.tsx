@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -11,11 +11,13 @@ import {
   ChevronRight,
   AlertTriangle,
   FileText,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { formatUSDC, truncateAddress } from '@/lib/utils';
+import { formatUSDC, truncateAddress, copyToClipboard } from '@/lib/utils';
 
 const API_URL =
   process.env.NODE_ENV === 'development'
@@ -25,6 +27,17 @@ const API_URL =
 export default function DashboardPage() {
   const { account, isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAddress = async () => {
+    if (account?.wallet_address) {
+      const success = await copyToClipboard(account.wallet_address);
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -233,11 +246,24 @@ export default function DashboardPage() {
                 <div className="text-sm text-gray-400 mb-1">
                   Linked Address
                 </div>
-                <div className="font-mono text-white bg-[#0a0a0a] rounded-lg p-3 flex items-center justify-between">
-                  <span>{truncateAddress(account.wallet_address)}</span>
-                  <span className="text-xs text-[#00D4AA] bg-[#00D4AA]/10 px-2 py-1 rounded">
-                    Base
-                  </span>
+                <div className="font-mono text-white bg-[#0a0a0a] rounded-lg p-3 flex items-center justify-between gap-2">
+                  <span className="truncate">{truncateAddress(account.wallet_address)}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={handleCopyAddress}
+                      className="p-1.5 text-gray-400 hover:text-white transition-colors"
+                      title="Copy address"
+                    >
+                      {copied ? (
+                        <Check className="w-4 h-4 text-[#00D4AA]" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                    <span className="text-xs text-[#00D4AA] bg-[#00D4AA]/10 px-2 py-1 rounded">
+                      Base
+                    </span>
+                  </div>
                 </div>
                 <p className="text-gray-500 text-sm mt-3">
                   Send USDC on Base network to this address for direct deposits.
