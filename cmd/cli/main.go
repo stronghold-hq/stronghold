@@ -201,6 +201,28 @@ You can deposit via:
 
 	accountCmd.AddCommand(accountBalanceCmd, accountDepositCmd)
 
+	// Wallet command
+	walletCmd := &cobra.Command{
+		Use:   "wallet",
+		Short: "Manage your Stronghold wallet",
+	}
+
+	walletExportCmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export wallet private key to a file",
+		Long: `Export your wallet private key to a file for backup.
+
+By default, exports to ~/.stronghold/wallet-backup
+Use --output to specify a different location.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			output, _ := cmd.Flags().GetString("output")
+			return cli.ExportWallet(output)
+		},
+	}
+	walletExportCmd.Flags().StringP("output", "o", "", "Output file path (default: ~/.stronghold/wallet-backup)")
+
+	walletCmd.AddCommand(walletExportCmd)
+
 	// Doctor command
 	doctorCmd := &cobra.Command{
 		Use:   "doctor",
@@ -232,6 +254,7 @@ Run this before 'stronghold install' to catch issues early.`,
 		logsCmd,
 		configCmd,
 		accountCmd,
+		walletCmd,
 		doctorCmd,
 	)
 
