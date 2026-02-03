@@ -119,14 +119,3 @@ export function downloadTextFile(filename: string, content: string) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
-
-/**
- * Generate a random account number (for display purposes)
- */
-export function generateRandomAccountNumber(): string {
-  const parts = [];
-  for (let i = 0; i < 4; i++) {
-    parts.push(Math.floor(Math.random() * 10000).toString().padStart(4, '0'));
-  }
-  return parts.join('-');
-}

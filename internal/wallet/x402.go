@@ -51,20 +51,26 @@ type X402Config struct {
 	ChainID        int
 }
 
-// X402Configs for supported networks
-var (
-	X402BaseMainnet = X402Config{
+// x402NetworkConfigs maps network names to their configurations
+var x402NetworkConfigs = map[string]X402Config{
+	"base": {
 		Network:        "base",
 		TokenAddress:   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
 		FacilitatorURL: "https://x402.org/facilitator",
 		ChainID:        8453,
-	}
-	X402BaseSepolia = X402Config{
+	},
+	"base-sepolia": {
 		Network:        "base-sepolia",
 		TokenAddress:   "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
 		FacilitatorURL: "https://x402.org/facilitator",
 		ChainID:        84532,
-	}
+	},
+}
+
+// X402Configs for supported networks (exported for compatibility)
+var (
+	X402BaseMainnet = x402NetworkConfigs["base"]
+	X402BaseSepolia = x402NetworkConfigs["base-sepolia"]
 )
 
 // CreateX402Payment creates a signed x402 payment for the given requirements
@@ -74,13 +80,8 @@ func (w *Wallet) CreateX402Payment(req *PaymentRequirements) (string, error) {
 	}
 
 	// Get x402 config for network
-	var x402Config X402Config
-	switch req.Network {
-	case "base":
-		x402Config = X402BaseMainnet
-	case "base-sepolia":
-		x402Config = X402BaseSepolia
-	default:
+	x402Config, ok := x402NetworkConfigs[req.Network]
+	if !ok {
 		return "", fmt.Errorf("unsupported network: %s", req.Network)
 	}
 
@@ -101,37 +102,14 @@ func (w *Wallet) CreateX402Payment(req *PaymentRequirements) (string, error) {
 	}
 
 	// Create EIP-712 typed data for signing
-	typedData := &TypedData{
-		Types: map[string][]TypedDataField{
-			"EIP712Domain": {
-				{Name: "name", Type: "string"},
-				{Name: "version", Type: "string"},
-				{Name: "chainId", Type: "uint256"},
-				{Name: "verifyingContract", Type: "address"},
-			},
-			"Payment": {
-				{Name: "receiver", Type: "address"},
-				{Name: "tokenAddress", Type: "address"},
-				{Name: "amount", Type: "uint256"},
-				{Name: "timestamp", Type: "uint256"},
-				{Name: "nonce", Type: "string"},
-			},
-		},
-		PrimaryType: "Payment",
-		Domain: TypedDataDomain{
-			Name:              "x402",
-			Version:           "1",
-			ChainID:           x402Config.ChainID,
-			VerifyingContract: req.Recipient,
-		},
-		Message: map[string]interface{}{
-			"receiver":     req.Recipient,
-			"tokenAddress": x402Config.TokenAddress,
-			"amount":       req.Amount,
-			"timestamp":    payload.Timestamp,
-			"nonce":        nonce,
-		},
-	}
+	typedData := buildPaymentTypedData(
+		x402Config.ChainID,
+		req.Recipient,
+		x402Config.TokenAddress,
+		req.Amount,
+		payload.Timestamp,
+		nonce,
+	)
 
 	// Sign the typed data
 	signature, err := w.SignTypedData(typedData)
@@ -158,37 +136,14 @@ func (w *Wallet) CreateX402Payment(req *PaymentRequirements) (string, error) {
 // This can be used client-side to verify before sending
 func VerifyPaymentSignature(payload *X402Payload, expectedPayer string) error {
 	// Reconstruct the typed data hash
-	typedData := &TypedData{
-		Types: map[string][]TypedDataField{
-			"EIP712Domain": {
-				{Name: "name", Type: "string"},
-				{Name: "version", Type: "string"},
-				{Name: "chainId", Type: "uint256"},
-				{Name: "verifyingContract", Type: "address"},
-			},
-			"Payment": {
-				{Name: "receiver", Type: "address"},
-				{Name: "tokenAddress", Type: "address"},
-				{Name: "amount", Type: "uint256"},
-				{Name: "timestamp", Type: "uint256"},
-				{Name: "nonce", Type: "string"},
-			},
-		},
-		PrimaryType: "Payment",
-		Domain: TypedDataDomain{
-			Name:              "x402",
-			Version:           "1",
-			ChainID:           getChainID(payload.Network),
-			VerifyingContract: payload.Receiver,
-		},
-		Message: map[string]interface{}{
-			"receiver":     payload.Receiver,
-			"tokenAddress": payload.TokenAddress,
-			"amount":       payload.Amount,
-			"timestamp":    payload.Timestamp,
-			"nonce":        payload.Nonce,
-		},
-	}
+	typedData := buildPaymentTypedData(
+		getChainID(payload.Network),
+		payload.Receiver,
+		payload.TokenAddress,
+		payload.Amount,
+		payload.Timestamp,
+		payload.Nonce,
+	)
 
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {
@@ -259,6 +214,41 @@ func ParseX402Payment(paymentHeader string) (*X402Payload, error) {
 }
 
 // Helper functions
+
+// buildPaymentTypedData creates the EIP-712 typed data structure for payment signing/verification
+func buildPaymentTypedData(chainID int, receiver, tokenAddress, amount string, timestamp int64, nonce string) *TypedData {
+	return &TypedData{
+		Types: map[string][]TypedDataField{
+			"EIP712Domain": {
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"Payment": {
+				{Name: "receiver", Type: "address"},
+				{Name: "tokenAddress", Type: "address"},
+				{Name: "amount", Type: "uint256"},
+				{Name: "timestamp", Type: "uint256"},
+				{Name: "nonce", Type: "string"},
+			},
+		},
+		PrimaryType: "Payment",
+		Domain: TypedDataDomain{
+			Name:              "x402",
+			Version:           "1",
+			ChainID:           chainID,
+			VerifyingContract: receiver,
+		},
+		Message: map[string]interface{}{
+			"receiver":     receiver,
+			"tokenAddress": tokenAddress,
+			"amount":       amount,
+			"timestamp":    timestamp,
+			"nonce":        nonce,
+		},
+	}
+}
 
 func generateNonce() (string, error) {
 	// Generate a cryptographically secure random nonce

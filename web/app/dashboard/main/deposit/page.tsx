@@ -6,13 +6,13 @@ import {
   ArrowLeft,
   CreditCard,
   Wallet,
-  Copy,
   Check,
   AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { formatUSDC, truncateAddress, copyToClipboard } from '@/lib/utils';
+import { CopyButton } from '@/components/ui/CopyButton';
+import { formatUSDC } from '@/lib/utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -23,17 +23,6 @@ export default function DepositPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyAddress = async () => {
-    if (account?.wallet_address) {
-      const success = await copyToClipboard(account.wallet_address);
-      if (success) {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,17 +246,7 @@ export default function DepositPage() {
                       <code className="flex-1 font-mono text-white text-sm break-all">
                         {account.wallet_address}
                       </code>
-                      <button
-                        onClick={handleCopyAddress}
-                        className="p-2 text-gray-400 hover:text-white transition-colors"
-                        title="Copy address"
-                      >
-                        {copied ? (
-                          <Check className="w-4 h-4 text-[#00D4AA]" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
-                      </button>
+                      <CopyButton text={account.wallet_address} className="p-2" />
                     </div>
                   ) : (
                     <div className="text-center py-4">

@@ -136,6 +136,7 @@ func (h *AccountHandler) GetUsage(c fiber.Ctx) error {
 
 	var req GetUsageRequest
 	if err := c.Bind().Query(&req); err != nil {
+		// Apply sensible defaults when query binding fails (e.g., invalid types)
 		req.Limit = 50
 		req.Offset = 0
 	}

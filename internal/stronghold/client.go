@@ -441,15 +441,6 @@ func severityFromScore(score float64) string {
 	return "low"
 }
 
-func severityFromConfidence(confidence float64) string {
-	if confidence >= 0.8 {
-		return "high"
-	} else if confidence >= 0.5 {
-		return "medium"
-	}
-	return "low"
-}
-
 func extractThreatsFromScore(text string, score float64) []Threat {
 	// When using heuristic-only mode (no hybrid detector), we rely on the
 	// ThreatScorer's keyword weights to determine what patterns contributed to the score.

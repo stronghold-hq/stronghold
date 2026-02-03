@@ -3,8 +3,11 @@
 import { motion } from 'framer-motion';
 import { CreditCard, Wallet, AlertTriangle, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { SkeletonTableRow } from '@/components/ui/Skeleton';
+import { TableHeader } from '@/components/ui/TableHeader';
 import { formatDate, formatUSDC } from '@/lib/utils';
 import type { Deposit } from '@/lib/hooks/useDeposits';
+
+const DEPOSITS_TABLE_COLUMNS = ['Date', 'Amount', 'Fee', 'Net', 'Provider', 'Status'];
 
 interface DepositsTableProps {
   deposits: Deposit[];
@@ -36,20 +39,11 @@ export function DepositsTable({ deposits, loading, hasMore, onLoadMore }: Deposi
     return (
       <div className="bg-[#111] border border-[#222] rounded-xl overflow-hidden">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#222]">
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Date</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Amount</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Fee</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Net</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Provider</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Status</th>
-            </tr>
-          </thead>
+          <TableHeader columns={DEPOSITS_TABLE_COLUMNS} />
           <tbody>
-            <SkeletonTableRow columns={6} />
-            <SkeletonTableRow columns={6} />
-            <SkeletonTableRow columns={6} />
+            {Array.from({ length: 3 }).map((_, i) => (
+              <SkeletonTableRow key={i} columns={6} />
+            ))}
           </tbody>
         </table>
       </div>
@@ -80,16 +74,7 @@ export function DepositsTable({ deposits, loading, hasMore, onLoadMore }: Deposi
     <div className="bg-[#111] border border-[#222] rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#222]">
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Date</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Amount</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Fee</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Net</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Provider</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Status</th>
-            </tr>
-          </thead>
+          <TableHeader columns={DEPOSITS_TABLE_COLUMNS} />
           <tbody>
             {deposits.map((deposit, index) => {
               const status = statusConfig[deposit.status];

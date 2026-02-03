@@ -63,6 +63,11 @@ func NewAuthHandler(database *db.DB, config *AuthConfig, kmsClient *kms.Client) 
 	}
 }
 
+// Config returns the auth configuration (used by other handlers that need the same config)
+func (h *AuthHandler) Config() *AuthConfig {
+	return h.config
+}
+
 // setAuthCookies sets httpOnly cookies for access and refresh tokens
 func (h *AuthHandler) setAuthCookies(c fiber.Ctx, accessToken, refreshToken string, accessExpiry, refreshExpiry time.Time) {
 	sameSite := h.parseSameSite()

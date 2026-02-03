@@ -3,8 +3,11 @@
 import { motion } from 'framer-motion';
 import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { SkeletonTableRow } from '@/components/ui/Skeleton';
+import { TableHeader } from '@/components/ui/TableHeader';
 import { formatRelativeTime, formatUSDC } from '@/lib/utils';
 import type { UsageLog } from '@/lib/hooks/useUsage';
+
+const USAGE_TABLE_COLUMNS = ['Time', 'Endpoint', 'Cost', 'Status', 'Threat'];
 
 interface UsageTableProps {
   logs: UsageLog[];
@@ -23,21 +26,11 @@ export function UsageTable({ logs, loading, hasMore, onLoadMore }: UsageTablePro
     return (
       <div className="bg-[#111] border border-[#222] rounded-xl overflow-hidden">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#222]">
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Time</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Endpoint</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Cost</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Status</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Threat</th>
-            </tr>
-          </thead>
+          <TableHeader columns={USAGE_TABLE_COLUMNS} />
           <tbody>
-            <SkeletonTableRow columns={5} />
-            <SkeletonTableRow columns={5} />
-            <SkeletonTableRow columns={5} />
-            <SkeletonTableRow columns={5} />
-            <SkeletonTableRow columns={5} />
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonTableRow key={i} columns={5} />
+            ))}
           </tbody>
         </table>
       </div>
@@ -62,15 +55,7 @@ export function UsageTable({ logs, loading, hasMore, onLoadMore }: UsageTablePro
     <div className="bg-[#111] border border-[#222] rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#222]">
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Time</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Endpoint</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Cost</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Status</th>
-              <th className="text-left text-gray-500 text-sm font-medium py-3 px-4">Threat</th>
-            </tr>
-          </thead>
+          <TableHeader columns={USAGE_TABLE_COLUMNS} />
           <tbody>
             {logs.map((log, index) => (
               <motion.tr

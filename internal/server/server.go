@@ -165,18 +165,8 @@ func (s *Server) setupRoutes() {
 	s.authHandler.RegisterRoutesWithMiddleware(s.app, rateLimiter.AuthLimiter())
 
 	// Account handlers (no payment required for account management)
-	accountHandler := handlers.NewAccountHandler(s.database, &handlers.AuthConfig{
-		JWTSecret:       s.config.Auth.JWTSecret,
-		AccessTokenTTL:  s.config.Auth.AccessTokenTTL,
-		RefreshTokenTTL: s.config.Auth.RefreshTokenTTL,
-		DashboardURL:    s.config.Dashboard.URL,
-		AllowedOrigins:  s.config.Dashboard.AllowedOrigins,
-		Cookie: handlers.CookieConfig{
-			Domain:   s.config.Cookie.Domain,
-			Secure:   s.config.Cookie.Secure,
-			SameSite: s.config.Cookie.SameSite,
-		},
-	}, &s.config.Stripe)
+	// Reuse authConfig from authHandler initialization
+	accountHandler := handlers.NewAccountHandler(s.database, s.authHandler.Config(), &s.config.Stripe)
 	accountHandler.RegisterRoutes(s.app, s.authHandler)
 
 	// Stripe webhook handler (no auth required - verified via signature)
