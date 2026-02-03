@@ -11,6 +11,14 @@ Stronghold is a pay-per-request AI security scanning platform with three compone
 
 The platform provides 4-layer security scanning: heuristics, ML classification (Citadel/Hugot), semantic similarity, and optional LLM classification.
 
+## Temporary Files
+
+**IMPORTANT: Never create temporary or working files in the project directory.**
+
+- Review documents, scratch notes, analysis outputs → `/tmp/` or the scratchpad directory
+- Only production code, tests, and essential documentation belong in the repo
+- If you need to write intermediate results, use `/tmp/` not the project root
+
 ## Build Commands
 
 ```bash
