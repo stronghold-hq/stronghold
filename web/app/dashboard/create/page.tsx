@@ -172,11 +172,12 @@ export default function CreateAccountPage() {
               </div>
             </div>
 
-            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-6">
-              <p className="text-yellow-400 text-sm">
-                <strong>Important:</strong> Download your recovery file and
-                store it securely. This is the only way to recover your account
-                if you lose your account number.
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-6">
+              <p className="text-red-400 text-sm">
+                <strong>WARNING:</strong> Save your account number and download
+                your recovery file. There is <strong>NO way to recover your
+                account</strong> if you lose both. No email, no password reset,
+                no support recovery. Your funds will be permanently lost.
               </p>
             </div>
 
