@@ -266,7 +266,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <p className="text-gray-500 text-sm mt-3">
-                  Send USDC on Base network to this address for direct deposits.
+                  <span className="text-[#00D4AA] font-medium">To fund your account:</span> Send USDC on Base network to this address. Your balance updates automatically.
                 </p>
               </div>
             ) : (

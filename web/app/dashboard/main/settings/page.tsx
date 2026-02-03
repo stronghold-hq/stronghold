@@ -135,7 +135,7 @@ export default function SettingsPage() {
                 </span>
               </div>
               <p className="text-gray-500 text-xs mt-2">
-                Send USDC on Base network to this address for direct deposits.
+                <span className="text-[#00D4AA] font-medium">To fund your account:</span> Send USDC on Base to this address. Balance updates automatically.
               </p>
             </div>
           ) : (
