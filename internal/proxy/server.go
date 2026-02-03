@@ -147,7 +147,7 @@ func NewServer(config *Config) (*Server, error) {
 func LoadConfig() (*Config, error) {
 	config := &Config{
 		Proxy: ProxyConfig{
-			Port: 8080,
+			Port: 8402,
 			Bind: "127.0.0.1",
 		},
 		API: APIConfig{
@@ -201,7 +201,24 @@ func (s *Server) Start(ctx context.Context) error {
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		// Port in use - try to find an available one
+		s.logger.Warn("configured port unavailable, searching for alternative",
+			"original_port", s.config.Proxy.Port, "error", err)
+
+		newPort := s.findAvailablePort(s.config.Proxy.Port + 1)
+		if newPort == 0 {
+			return fmt.Errorf("failed to listen on %s and no available ports found: %w", addr, err)
+		}
+
+		s.config.Proxy.Port = newPort
+		addr = s.config.GetProxyAddr()
+
+		listener, err = net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on fallback port %s: %w", addr, err)
+		}
+
+		s.logger.Info("using fallback port", "port", newPort)
 	}
 
 	s.listener = listener
@@ -225,6 +242,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return s.httpServer.Shutdown(ctx)
 	}
 	return nil
+}
+
+// findAvailablePort searches for an available port starting from startPort
+func (s *Server) findAvailablePort(startPort int) int {
+	for port := startPort; port < startPort+100; port++ {
+		addr := fmt.Sprintf("%s:%d", s.config.Proxy.Bind, port)
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			listener.Close()
+			return port
+		}
+	}
+	return 0
 }
 
 // handleRequest handles incoming HTTP requests

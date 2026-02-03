@@ -92,7 +92,7 @@ func DefaultConfig() *CLIConfig {
 	return &CLIConfig{
 		Version: ConfigVersion,
 		Proxy: ProxyConfig{
-			Port: 8080,
+			Port: 8402,
 			Bind: "127.0.0.1",
 		},
 		API: APIConfig{

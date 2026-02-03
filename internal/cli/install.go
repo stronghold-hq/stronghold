@@ -95,7 +95,7 @@ var (
 // NewInstallModel creates a new install model
 func NewInstallModel() *InstallModel {
 	portInput := textinput.New()
-	portInput.Placeholder = "8080"
+	portInput.Placeholder = "8402"
 	portInput.CharLimit = 5
 	portInput.Width = 10
 
@@ -109,7 +109,7 @@ func NewInstallModel() *InstallModel {
 		config:        DefaultConfig(),
 		portInput:     portInput,
 		apiInput:      apiInput,
-		configPort:    8080,
+		configPort:    8402,
 		configAPI:     "https://api.stronghold.security",
 		progress:      []string{},
 	}
@@ -457,7 +457,7 @@ func (m *InstallModel) viewConfig() string {
 	b.WriteString(headerStyle.Render("Configuration"))
 	b.WriteString("\n\n")
 
-	b.WriteString("Proxy port [8080]:\n")
+	b.WriteString("Proxy port [8402]:\n")
 	b.WriteString(m.portInput.View())
 	b.WriteString("\n\n")
 
@@ -561,7 +561,7 @@ func (m *InstallModel) runChecks() tea.Cmd {
 				return nil
 			}
 			m.config.Proxy.Port = newPort
-			m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Port 8080 in use, using port %d", newPort)))
+			m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Port %d in use, using port %d", m.config.Proxy.Port, newPort)))
 		} else {
 			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Port %d available", m.config.Proxy.Port)))
 		}
@@ -711,7 +711,7 @@ func RunInstallNonInteractive() error {
 			return fmt.Errorf("no available ports found")
 		}
 		config.Proxy.Port = newPort
-		fmt.Printf("Port 8080 in use, using port %d\n", newPort)
+		fmt.Printf("Port %d in use, using port %d\n", config.Proxy.Port, newPort)
 	}
 
 	// Save config
