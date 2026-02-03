@@ -210,6 +210,16 @@ func (w *Wallet) Exists() bool {
 	return err == nil
 }
 
+// Export returns the private key as a hex string
+// WARNING: Handle with extreme care - this exposes sensitive key material
+func (w *Wallet) Export() (string, error) {
+	item, err := w.keyring.Get(w.keyID())
+	if err != nil {
+		return "", fmt.Errorf("wallet not found: %w", err)
+	}
+	return string(item.Data), nil
+}
+
 // GetBalance returns the USDC balance for this wallet
 func (w *Wallet) GetBalance(ctx context.Context) (*big.Int, error) {
 	if w.Address == (common.Address{}) {
