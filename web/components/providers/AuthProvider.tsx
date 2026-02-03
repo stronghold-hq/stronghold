@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const API_URL = rawApiUrl.trim();
 
 interface Account {
   id: string;
