@@ -24,11 +24,7 @@ body {
 }
 
 body {
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--background-start-rgb)),
-    rgb(var(--background-end-rgb))
-  );
+  background: #0d1f2d;
   color: rgb(var(--foreground-rgb));
   font-family: 'Space Grotesk', system-ui, sans-serif;
 }
