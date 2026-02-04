@@ -112,14 +112,13 @@ export default function Hero() {
 
               {/* Proxy */}
               <div className="flex flex-col items-center gap-2">
-                <div className="w-20 h-20 rounded-lg bg-stronghold-cyan/10 flex items-center justify-center border border-stronghold-cyan/50 relative overflow-hidden">
-                  <div className="absolute inset-0 bg-stronghold-cyan/5 animate-pulse" />
+                <div className="w-20 h-20 rounded-lg overflow-hidden border border-stronghold-cyan/50">
                   <Image
                     src="/logo.png"
                     alt="Stronghold"
-                    width={64}
-                    height={64}
-                    className="relative z-10"
+                    width={80}
+                    height={80}
+                    className="w-full h-full object-cover"
                   />
                 </div>
                 <span className="font-mono text-stronghold-cyan text-xs">Stronghold</span>
