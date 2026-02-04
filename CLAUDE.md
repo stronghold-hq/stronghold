@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Workflow
+
+**CRITICAL: Do NOT commit or push unless explicitly told to do so.**
+
+- Make changes and verify they work locally first
+- Wait for explicit user approval before committing
+- Never assume a change is ready to commit just because you made it
+- Always test frontend changes locally with `bun run dev` before considering them complete
+- Do not push multiple speculative commits hoping one works
+
 ## Project Overview
 
 Stronghold is a pay-per-request AI security scanning platform with three components:
