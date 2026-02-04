@@ -2,7 +2,8 @@
 
 import { motion } from 'framer-motion'
 import Button from '../ui/Button'
-import { Shield, ArrowRight, Github } from 'lucide-react'
+import { ArrowRight, Github } from 'lucide-react'
+import Image from 'next/image'
 
 export default function Hero() {
   return (
@@ -113,7 +114,13 @@ export default function Hero() {
               <div className="flex flex-col items-center gap-2">
                 <div className="w-20 h-20 rounded-lg bg-stronghold-cyan/10 flex items-center justify-center border border-stronghold-cyan/50 relative overflow-hidden">
                   <div className="absolute inset-0 bg-stronghold-cyan/5 animate-pulse" />
-                  <Shield size={28} className="text-stronghold-cyan relative z-10" />
+                  <Image
+                    src="/logo.png"
+                    alt="Stronghold"
+                    width={40}
+                    height={40}
+                    className="relative z-10"
+                  />
                 </div>
                 <span className="font-mono text-stronghold-cyan text-xs">Stronghold</span>
               </div>
