@@ -4,6 +4,13 @@
 #
 # Build: docker build -f Dockerfile.cli-test -t stronghold-cli-test .
 # Run:   docker run -it --cap-add=NET_ADMIN stronghold-cli-test
+#
+# For Base Sepolia testnet testing:
+#   docker run -it --cap-add=NET_ADMIN \
+#     -e STRONGHOLD_API_URL=http://host.docker.internal:8080 \
+#     -e X402_NETWORK=base-sepolia \
+#     -e TEST_PRIVATE_KEY=0x... \
+#     stronghold-cli-test
 
 FROM golang:1.25-alpine
 
@@ -17,7 +24,8 @@ RUN apk add --no-cache \
     git \
     ca-certificates \
     pass \
-    gnupg
+    gnupg \
+    jq
 
 WORKDIR /app
 
@@ -32,8 +40,9 @@ COPY . .
 RUN go build -o /usr/local/bin/stronghold ./cmd/cli
 RUN go build -o /usr/local/bin/stronghold-proxy ./cmd/proxy
 
-# Set API URL environment variable (uses production API by default)
+# Set default environment variables
 ENV STRONGHOLD_API_URL=https://api.getstronghold.xyz
+ENV X402_NETWORK=base
 
 # Create entrypoint script that initializes GPG at runtime
 RUN printf '#!/bin/bash\nset -e\n\n\
@@ -45,6 +54,14 @@ if [ ! -d ~/.gnupg ] || [ ! -f ~/.gnupg/trustdb.gpg ]; then\n\
 fi\n\n\
 gpgconf --kill gpg-agent 2>/dev/null || true\n\
 gpg-agent --daemon --allow-preset-passphrase 2>/dev/null || true\n\n\
+echo ""\n\
+echo "=== Stronghold CLI Test Environment ==="\n\
+echo "API URL: $STRONGHOLD_API_URL"\n\
+echo "Network: ${X402_NETWORK:-base}"\n\
+if [ -n "$TEST_PRIVATE_KEY" ]; then\n\
+    echo "Private key: [provided]"\n\
+fi\n\
+echo ""\n\
 exec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

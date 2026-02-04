@@ -45,7 +45,7 @@ All HTTP/HTTPS traffic is now routed through the transparent proxy for real-time
 - **Multi-Layer Detection**: Four-layer scanning pipeline (heuristics, ML classification, semantic similarity, and optional LLM classification) delivers sub-50ms latency
 - **Network-Level Protection**: Transparent proxy intercepts traffic at the kernel level, blocking threats before they reach your models
 - **Bidirectional Scanning**: Detects prompt injection on inbound content and credential leaks on outbound responses
-- **Pay-Per-Request Pricing**: $0.001 per scan via x402 protocol using USDC on Base, with no API keys or subscriptions required
+- **Pay-Per-Request Pricing**: $0.002 per scan via x402 protocol using USDC on Base, with no API keys or subscriptions required
 - **Open Source**: MIT licensed and fully self-hostable
 
 ---
@@ -238,8 +238,8 @@ Payment via x402 protocol is required for the following endpoints.
 
 | Endpoint | Method | Price | Description |
 |----------|--------|-------|-------------|
-| `/v1/scan/content` | POST | $0.001 | Prompt injection detection |
-| `/v1/scan/output` | POST | $0.001 | Credential leak detection |
+| `/v1/scan/content` | POST | $0.002 | Prompt injection detection |
+| `/v1/scan/output` | POST | $0.002 | Credential leak detection |
 
 ### POST /v1/scan/content
 
@@ -320,8 +320,8 @@ stronghold account deposit    # Display deposit options
 
 | Endpoint | Price per Request |
 |----------|-------------------|
-| `/v1/scan/content` | $0.001 |
-| `/v1/scan/output` | $0.001 |
+| `/v1/scan/content` | $0.002 |
+| `/v1/scan/output` | $0.002 |
 
 ### Credential Security
 

@@ -342,8 +342,8 @@ Response:
 ```json
 {
   "endpoints": {
-    "/v1/scan/content": {"price": "0.001", "currency": "USD"},
-    "/v1/scan/output": {"price": "0.001", "currency": "USD"}
+    "/v1/scan/content": {"price": "0.002", "currency": "USD"},
+    "/v1/scan/output": {"price": "0.002", "currency": "USD"}
   }
 }
 ```

@@ -174,7 +174,7 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
 
 	// Scan handlers (payment required - now uses AtomicPayment for atomic settlement)
-	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, s.database)
+	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, s.database, &s.config.Pricing)
 	scanHandler.RegisterRoutes(s.app)
 
 	// API documentation

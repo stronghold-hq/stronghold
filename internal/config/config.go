@@ -174,8 +174,8 @@ func Load() *Config {
 			LLMAPIKey:       getEnv("STRONGHOLD_LLM_API_KEY", ""),
 		},
 		Pricing: PricingConfig{
-			ScanContent: getFloat("PRICE_SCAN_CONTENT", 0.001),
-			ScanOutput:  getFloat("PRICE_SCAN_OUTPUT", 0.001),
+			ScanContent: getFloat("PRICE_SCAN_CONTENT", 0.002),
+			ScanOutput:  getFloat("PRICE_SCAN_OUTPUT", 0.002),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:       getBool("RATE_LIMIT_ENABLED", true),

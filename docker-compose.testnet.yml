@@ -1,0 +1,113 @@
+# Docker Compose for Base Sepolia testnet testing
+#
+# Prerequisites:
+#   1. Get Base Sepolia ETH from faucet: https://www.alchemy.com/faucets/base-sepolia
+#   2. Get testnet USDC: Bridge from Sepolia or use USDC faucet
+#   3. Export your funded wallet's private key
+#
+# Usage:
+#   export TEST_PRIVATE_KEY=0x...your_funded_wallet_private_key
+#   docker-compose -f docker-compose.testnet.yml up -d
+#   docker-compose -f docker-compose.testnet.yml exec cli bash
+#
+# Inside the container:
+#   stronghold init --yes --private-key $TEST_PRIVATE_KEY
+#   stronghold enable
+#   curl -x http://localhost:8402 http://httpbin.org/html
+
+version: '3.8'
+
+services:
+  # PostgreSQL for API
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stronghold
+      POSTGRES_PASSWORD: testnet_password
+      POSTGRES_DB: stronghold
+    volumes:
+      - testnet_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stronghold"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Stronghold API server configured for Base Sepolia
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: stronghold
+      DB_PASSWORD: testnet_password
+      DB_NAME: stronghold
+      DB_SSLMODE: disable
+      # x402 Configuration - Base Sepolia testnet
+      X402_NETWORK: base-sepolia
+      X402_WALLET_ADDRESS: ${API_WALLET_ADDRESS:-0x0000000000000000000000000000000000000000}
+      X402_FACILITATOR_URL: https://x402.org/facilitator
+      # JWT (generate with: openssl rand -base64 32)
+      JWT_SECRET: testnet_jwt_secret_change_in_production
+      # Scanner settings
+      STRONGHOLD_BLOCK_THRESHOLD: "0.55"
+      STRONGHOLD_WARN_THRESHOLD: "0.35"
+      STRONGHOLD_ENABLE_HUGOT: "false"
+      STRONGHOLD_ENABLE_SEMANTICS: "false"
+      # Pricing
+      PRICE_SCAN_CONTENT: "0.002"
+      PRICE_SCAN_OUTPUT: "0.002"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # CLI testing container with network capabilities
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli-test
+    environment:
+      # Point to local API server
+      STRONGHOLD_API_URL: http://api:8080
+      # Pass through the test private key
+      TEST_PRIVATE_KEY: ${TEST_PRIVATE_KEY:-}
+      # Use Base Sepolia network
+      X402_NETWORK: base-sepolia
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - api
+    stdin_open: true
+    tty: true
+    # Keep container running
+    command: >
+      bash -c "
+        echo '=== Stronghold Base Sepolia Testnet Environment ==='
+        echo ''
+        echo 'API URL: http://api:8080'
+        echo 'Network: base-sepolia'
+        echo ''
+        if [ -n \"$$TEST_PRIVATE_KEY\" ]; then
+          echo 'Private key provided - ready for: stronghold init --yes --private-key $$TEST_PRIVATE_KEY'
+        else
+          echo 'No TEST_PRIVATE_KEY set - will create new wallet'
+          echo 'To use existing funded wallet: export TEST_PRIVATE_KEY=0x...'
+        fi
+        echo ''
+        echo 'Commands:'
+        echo '  stronghold init --yes                    # Create new wallet'
+        echo '  stronghold init --yes --private-key KEY  # Import funded wallet'
+        echo '  stronghold enable                        # Start proxy'
+        echo '  stronghold status                        # Check status'
+        echo '  stronghold account balance               # Check balance'
+        echo ''
+        exec bash
+      "
+
+volumes:
+  testnet_pgdata:
