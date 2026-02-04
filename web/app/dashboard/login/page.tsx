@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Shield, ArrowRight, AlertCircle } from 'lucide-react';
+import { ArrowRight, AlertCircle } from 'lucide-react';
+import Logo from '@/components/Logo';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { formatAccountNumber, isValidAccountNumber } from '@/lib/utils';
 
@@ -65,9 +66,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#00D4AA] to-[#00a884] flex items-center justify-center">
-              <Shield className="w-7 h-7 text-black" />
-            </div>
+            <Logo size={48} />
             <span className="text-2xl font-bold text-white">Stronghold</span>
           </div>
         </div>
