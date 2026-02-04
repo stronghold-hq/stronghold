@@ -151,32 +151,73 @@ Your wallet balance will be preserved unless you explicitly delete your account.
 	configCmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage Stronghold configuration",
-		Long:  `View and modify Stronghold configuration settings.`,
+		Long: `View and modify Stronghold configuration settings.
+
+Examples:
+  stronghold config get                           Show all config
+  stronghold config get scanning                  Show scanning config
+  stronghold config get scanning.content.enabled  Get specific value
+  stronghold config set scanning.content.action_on_block allow
+  stronghold config set scanning.output.enabled false
+
+Available scanning keys:
+  scanning.content.enabled          - Enable content scanning (true/false)
+  scanning.content.action_on_warn   - Action on WARN (allow/warn/block)
+  scanning.content.action_on_block  - Action on BLOCK (allow/warn/block)
+  scanning.output.enabled           - Enable output scanning (true/false)
+  scanning.output.action_on_warn    - Action on WARN (allow/warn/block)
+  scanning.output.action_on_block   - Action on BLOCK (allow/warn/block)
+  scanning.mode                     - Scanning mode (smart/strict/permissive)
+  scanning.block_threshold          - Score threshold for BLOCK (0.0-1.0)
+  scanning.fail_open                - Pass traffic if scan fails (true/false)`,
 	}
 
 	configGetCmd := &cobra.Command{
-		Use:   "get",
+		Use:   "get [key]",
 		Short: "Get configuration value",
+		Long: `Get a configuration value using dot notation.
+
+If no key is provided, displays all configuration.
+
+Examples:
+  stronghold config get                           Show all config
+  stronghold config get scanning                  Show scanning section
+  stronghold config get scanning.content          Show content scanning config
+  stronghold config get scanning.content.enabled  Get specific value`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config, err := cli.LoadConfig()
-			if err != nil {
-				return err
+			key := ""
+			if len(args) > 0 {
+				key = args[0]
 			}
-			fmt.Printf("Config file: %s\n", cli.ConfigPath())
-			fmt.Printf("Proxy port: %d\n", config.Proxy.Port)
-			fmt.Printf("API endpoint: %s\n", config.API.Endpoint)
-			fmt.Printf("Logged in: %v\n", config.Auth.LoggedIn)
-			if config.Auth.LoggedIn {
-				fmt.Printf("User: %s\n", config.Auth.Email)
-				if config.Wallet.Address != "" {
-					fmt.Printf("Account: %s\n", config.Wallet.Address)
-				}
-			}
-			return nil
+			return cli.ConfigGet(key)
 		},
 	}
 
-	configCmd.AddCommand(configGetCmd)
+	configSetCmd := &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set configuration value",
+		Long: `Set a configuration value using dot notation.
+
+Examples:
+  stronghold config set scanning.content.action_on_block allow
+  stronghold config set scanning.output.enabled false
+  stronghold config set scanning.block_threshold 0.6
+  stronghold config set proxy.port 8403
+
+Available scanning keys:
+  scanning.content.enabled          - Enable content scanning (true/false)
+  scanning.content.action_on_warn   - Action on WARN (allow/warn/block)
+  scanning.content.action_on_block  - Action on BLOCK (allow/warn/block)
+  scanning.output.enabled           - Enable output scanning (true/false)
+  scanning.output.action_on_warn    - Action on WARN (allow/warn/block)
+  scanning.output.action_on_block   - Action on BLOCK (allow/warn/block)`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.ConfigSet(args[0], args[1])
+		},
+	}
+
+	configCmd.AddCommand(configGetCmd, configSetCmd)
 
 	// Account command
 	accountCmd := &cobra.Command{

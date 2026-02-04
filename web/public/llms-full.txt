@@ -134,7 +134,86 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 | stronghold account deposit | Show deposit options                     | No   |
 | stronghold wallet export   | Export private key for backup            | No   |
 | stronghold wallet replace  | Replace wallet with a new private key    | No   |
+| stronghold config get      | Get configuration value                  | No   |
+| stronghold config set      | Set configuration value                  | No   |
 | stronghold uninstall       | Remove Stronghold from system            | Yes  |
+
+### Config Command Usage
+
+```bash
+# View all configuration
+stronghold config get
+
+# View scanning section
+stronghold config get scanning
+
+# View specific value
+stronghold config get scanning.content.action_on_block
+
+# Set a value
+stronghold config set scanning.content.action_on_block allow
+stronghold config set scanning.output.enabled false
+```
+
+### Configurable Scanning Behavior
+
+Control how the proxy handles scan results for content (incoming) and output (outgoing):
+
+```yaml
+# ~/.stronghold/config.yaml
+scanning:
+  mode: smart
+  block_threshold: 0.55
+  fail_open: true
+
+  # Content scanning - incoming responses for prompt injection
+  content:
+    enabled: true           # default: true
+    action_on_warn: "warn"  # "allow" | "warn" | "block" (default: warn)
+    action_on_block: "block" # "allow" | "warn" | "block" (default: block)
+
+  # Output scanning - outgoing requests for credential leaks
+  output:
+    enabled: true           # default: true
+    action_on_warn: "warn"  # "allow" | "warn" | "block" (default: warn)
+    action_on_block: "block" # "allow" | "warn" | "block" (default: block)
+```
+
+**Action options:**
+- `allow` = pass through (scan result in headers only, never blocks)
+- `warn` = pass through with X-Stronghold-Warning header
+- `block` = return 403 Forbidden
+
+**Example configurations:**
+
+```yaml
+# Paranoid mode - block everything flagged
+scanning:
+  content:
+    action_on_warn: block
+    action_on_block: block
+
+# Permissive content - strict output (protect credentials, allow risky reads)
+scanning:
+  content:
+    action_on_warn: allow
+    action_on_block: allow   # Never block incoming content
+  output:
+    action_on_warn: warn
+    action_on_block: block   # Block credential leaks
+
+# Audit mode - scan but never block (useful for testing)
+scanning:
+  content:
+    action_on_warn: allow
+    action_on_block: allow
+  output:
+    action_on_warn: allow
+    action_on_block: allow
+```
+
+**Security note**: No header-based bypass is allowed. Config-only control ensures
+a prompt injection attack cannot convince an agent to add bypass headers.
 
 ### How the Proxy Works
 
@@ -164,14 +243,51 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 - Adds X-Stronghold-Decision headers to responses
 - Blocks malicious content before agents see it
 
-### Response Headers
+### Response Headers for Agentic Integration
 
-When proxy is enabled, responses include:
+When proxy is enabled, ALL responses include headers describing scan results:
 
+| Header | Description | Values |
+|--------|-------------|--------|
+| X-Stronghold-Decision | What the scan found | ALLOW, WARN, BLOCK |
+| X-Stronghold-Action | What the proxy did | allow, warn, block |
+| X-Stronghold-Reason | Why content was flagged | Human-readable string |
+| X-Stronghold-Score | Combined threat score | 0.00 - 1.00 |
+| X-Stronghold-Scan-Type | Type of scan performed | content, output, disabled |
+| X-Stronghold-Warning | Warning message | (present only if action=warn) |
+| X-Stronghold-Request-ID | UUID for tracing | req-timestamp |
+| X-Stronghold-Scan-Latency | Time to scan | NNms |
+
+**Key insight**: Decision and Action can differ based on configuration.
+- Decision = what the scanner found (BLOCK means high threat score)
+- Action = what the proxy did about it (may be "allow" if configured permissively)
+
+This allows agents to see scan results without being blocked:
 ```
-X-Stronghold-Decision: ALLOW|WARN|BLOCK
-X-Stronghold-Reason: <human-readable explanation>
-X-Stronghold-Request-Id: <uuid for tracing>
+X-Stronghold-Decision: BLOCK   # Scanner flagged this
+X-Stronghold-Action: allow     # But config says pass it through
+X-Stronghold-Reason: High heuristic score - possible prompt injection
+```
+
+**Example: Parsing headers in Python**
+```python
+response = requests.get("http://example.com")
+decision = response.headers.get("X-Stronghold-Decision")
+if decision == "BLOCK":
+    reason = response.headers.get("X-Stronghold-Reason")
+    print(f"Content flagged: {reason}")
+    # Content was allowed through if you received it
+```
+
+**Example: Parsing headers in JavaScript**
+```javascript
+const response = await fetch("http://example.com");
+const decision = response.headers.get("X-Stronghold-Decision");
+const action = response.headers.get("X-Stronghold-Action");
+if (decision === "BLOCK" && action === "allow") {
+  console.log("Content was flagged but allowed:",
+              response.headers.get("X-Stronghold-Reason"));
+}
 ```
 
 ### Proxy Configuration

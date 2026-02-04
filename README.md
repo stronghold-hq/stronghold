@@ -55,6 +55,8 @@ All HTTP/HTTPS traffic is now routed through the transparent proxy for real-time
 - [How It Works](#how-it-works)
 - [Installation](#installation)
 - [CLI Reference](#cli-reference)
+  - [Configuring Scan Behavior](#configuring-scan-behavior)
+  - [Response Headers for Agentic Integration](#response-headers-for-agentic-integration)
 - [API Endpoints](#api-endpoints)
 - [Account & Funding](#account--funding)
 - [x402 Payment Flow](#x402-payment-flow)
@@ -166,7 +168,56 @@ Run `stronghold doctor` to verify that all system requirements are met.
 | `stronghold account deposit` | Display deposit options | No |
 | `stronghold wallet export` | Export private key for backup | No |
 | `stronghold wallet replace` | Replace wallet with a new private key | No |
+| `stronghold config get [key]` | Display configuration value(s) | No |
+| `stronghold config set <key> <value>` | Update a configuration value | No |
 | `stronghold uninstall` | Remove Stronghold from the system | Yes |
+
+### Configuring Scan Behavior
+
+Control how the proxy handles scan results without modifying the scanning itself:
+
+```bash
+# View all scanning configuration
+stronghold config get scanning
+
+# Never block content (headers still show scan results)
+stronghold config set scanning.content.action_on_block allow
+stronghold config set scanning.content.action_on_warn allow
+
+# Strict mode - block even warnings
+stronghold config set scanning.content.action_on_warn block
+
+# Disable content scanning entirely
+stronghold config set scanning.content.enabled false
+```
+
+Configuration file location: `~/.stronghold/config.yaml`
+
+Example configuration:
+```yaml
+scanning:
+  content:
+    enabled: true
+    action_on_warn: warn    # allow | warn | block
+    action_on_block: block  # allow | warn | block
+  output:
+    enabled: true
+    action_on_warn: warn
+    action_on_block: block
+```
+
+### Response Headers for Agentic Integration
+
+When the proxy scans content, headers are added to every response:
+
+| Header | Description |
+|--------|-------------|
+| `X-Stronghold-Decision` | Scan result: `ALLOW`, `WARN`, or `BLOCK` |
+| `X-Stronghold-Action` | Proxy action taken: `allow`, `warn`, or `block` |
+| `X-Stronghold-Reason` | Human-readable explanation (if flagged) |
+| `X-Stronghold-Score` | Combined threat score (0.00 - 1.00) |
+
+Headers are present even when content is not blocked, enabling agents to observe scan results programmatically.
 
 ---
 

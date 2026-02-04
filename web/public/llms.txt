@@ -62,6 +62,39 @@ stronghold status
 | stronghold account deposit | Show deposit options                     |
 | stronghold wallet export   | Export private key for backup            |
 | stronghold wallet replace  | Replace wallet with a new private key    |
+| stronghold config get      | Get configuration value                  |
+| stronghold config set      | Set configuration value                  |
+
+### Response Headers for Agentic Integration
+
+When Stronghold proxy scans content, it adds headers to every response:
+
+| Header | Description | Values |
+|--------|-------------|--------|
+| X-Stronghold-Decision | Scan result | ALLOW, WARN, BLOCK |
+| X-Stronghold-Action | What proxy did | allow, warn, block |
+| X-Stronghold-Reason | Why (if flagged) | Human-readable reason |
+| X-Stronghold-Score | Threat score | 0.00 - 1.00 |
+| X-Stronghold-Scan-Type | What was scanned | content, output, disabled |
+| X-Stronghold-Warning | Warning message | (only if action=warn) |
+
+These headers are always present, even when content is not blocked.
+
+### Configuring Scan Behavior
+
+Control blocking behavior via config:
+
+```bash
+# View current settings
+stronghold config get scanning
+
+# Never block content (scan only, headers show results)
+stronghold config set scanning.content.action_on_block allow
+stronghold config set scanning.content.action_on_warn allow
+
+# Strict mode - block even warnings
+stronghold config set scanning.content.action_on_warn block
+```
 
 ---
 

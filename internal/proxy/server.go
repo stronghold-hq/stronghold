@@ -54,11 +54,20 @@ type AuthConfig struct {
 	LoggedIn bool   `yaml:"logged_in"`
 }
 
+// ScanTypeConfig configures behavior for a specific scan type
+type ScanTypeConfig struct {
+	Enabled       bool   `yaml:"enabled"`         // Whether this scan type is active
+	ActionOnWarn  string `yaml:"action_on_warn"`  // "allow", "warn", "block"
+	ActionOnBlock string `yaml:"action_on_block"` // "allow", "warn", "block"
+}
+
 // ScanningConfig holds scanning configuration
 type ScanningConfig struct {
-	Mode           string  `yaml:"mode"`
-	BlockThreshold float64 `yaml:"block_threshold"`
-	FailOpen       bool    `yaml:"fail_open"`
+	Mode           string         `yaml:"mode"`
+	BlockThreshold float64        `yaml:"block_threshold"`
+	FailOpen       bool           `yaml:"fail_open"`
+	Content        ScanTypeConfig `yaml:"content"` // Prompt injection scanning (incoming)
+	Output         ScanTypeConfig `yaml:"output"`  // Credential leak scanning (outgoing)
 }
 
 // LoggingConfig holds logging configuration
@@ -70,6 +79,34 @@ type LoggingConfig struct {
 // GetProxyAddr returns the proxy address
 func (c *Config) GetProxyAddr() string {
 	return fmt.Sprintf("%s:%d", c.Proxy.Bind, c.Proxy.Port)
+}
+
+// applyDefaultScanTypeConfig sets default values for ScanTypeConfig if not already set
+func applyDefaultScanTypeConfig(cfg *ScanTypeConfig) {
+	// If ActionOnWarn is empty, this is an old config without these fields
+	if cfg.ActionOnWarn == "" {
+		cfg.Enabled = true
+		cfg.ActionOnWarn = "warn"
+		cfg.ActionOnBlock = "block"
+	}
+}
+
+// getAction determines what action to take based on scan decision and config
+func getAction(decision Decision, cfg ScanTypeConfig) string {
+	switch decision {
+	case DecisionWarn:
+		if cfg.ActionOnWarn != "" {
+			return cfg.ActionOnWarn
+		}
+		return "warn" // Default
+	case DecisionBlock:
+		if cfg.ActionOnBlock != "" {
+			return cfg.ActionOnBlock
+		}
+		return "block" // Default
+	default:
+		return "allow" // ALLOW decision always passes
+	}
 }
 
 // Server is the HTTP/HTTPS proxy server
@@ -158,6 +195,16 @@ func LoadConfig() (*Config, error) {
 			Mode:           "smart",
 			BlockThreshold: 0.55,
 			FailOpen:       true,
+			Content: ScanTypeConfig{
+				Enabled:       true,
+				ActionOnWarn:  "warn",
+				ActionOnBlock: "block",
+			},
+			Output: ScanTypeConfig{
+				Enabled:       true,
+				ActionOnWarn:  "warn",
+				ActionOnBlock: "block",
+			},
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -175,6 +222,9 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, config); err != nil {
 			return nil, fmt.Errorf("failed to parse config file: %w", err)
 		}
+		// Apply defaults for new ScanTypeConfig fields if not set (migration)
+		applyDefaultScanTypeConfig(&config.Scanning.Content)
+		applyDefaultScanTypeConfig(&config.Scanning.Output)
 	}
 
 	// Override with environment variables
@@ -337,46 +387,72 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 		return
 	}
 
-	// Scan the response if it's a scannable content type
-	contentType := resp.Header.Get("Content-Type")
-	scanResult := s.scanResponse(body, targetURL, contentType)
-
-	// Add Stronghold headers
-	w.Header().Set("X-Stronghold-Request-ID", generateRequestID())
+	// Add base Stronghold headers
+	requestID := generateRequestID()
+	w.Header().Set("X-Stronghold-Request-ID", requestID)
 	w.Header().Set("X-Stronghold-Scan-Latency", fmt.Sprintf("%dms", time.Since(start).Milliseconds()))
 
-	if scanResult != nil {
-		w.Header().Set("X-Stronghold-Decision", string(scanResult.Decision))
+	// Scan the response if content scanning is enabled
+	contentType := resp.Header.Get("Content-Type")
+	var scanResult *ScanResult
+	if s.config.Scanning.Content.Enabled {
+		scanResult = s.scanResponse(body, targetURL, contentType)
+	}
 
-		// Handle block decision
+	// Determine action based on scan result and config
+	var action string
+	if scanResult != nil {
+		action = getAction(scanResult.Decision, s.config.Scanning.Content)
+
+		// Always add scan result headers (even when not blocking)
+		w.Header().Set("X-Stronghold-Decision", string(scanResult.Decision))
+		w.Header().Set("X-Stronghold-Reason", scanResult.Reason)
+		w.Header().Set("X-Stronghold-Action", action)
+		w.Header().Set("X-Stronghold-Scan-Type", "content")
+		if score, ok := scanResult.Scores["combined"]; ok {
+			w.Header().Set("X-Stronghold-Score", fmt.Sprintf("%.2f", score))
+		} else if score, ok := scanResult.Scores["heuristic"]; ok {
+			w.Header().Set("X-Stronghold-Score", fmt.Sprintf("%.2f", score))
+		}
+
+		// Update counters based on original decision
 		if scanResult.Decision == DecisionBlock {
 			s.mu.Lock()
 			s.blockedCount++
 			s.mu.Unlock()
+		} else if scanResult.Decision == DecisionWarn {
+			s.mu.Lock()
+			s.warnedCount++
+			s.mu.Unlock()
+		}
 
-			s.logger.Warn("content blocked", "url", targetURL, "reason", scanResult.Reason)
-
+		// Handle action
+		switch action {
+		case "block":
+			s.logger.Warn("content blocked", "url", targetURL, "reason", scanResult.Reason, "decision", scanResult.Decision)
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(fmt.Sprintf(`{
 	"error": "Content blocked by Stronghold security scan",
 	"reason": "%s",
 	"request_id": "%s",
 	"recommended_action": "%s"
-}`, scanResult.Reason, generateRequestID(), scanResult.RecommendedAction)))
+}`, scanResult.Reason, requestID, scanResult.RecommendedAction)))
 			return
-		}
-
-		// Handle warn decision
-		if scanResult.Decision == DecisionWarn {
-			s.mu.Lock()
-			s.warnedCount++
-			s.mu.Unlock()
-
-			s.logger.Warn("content warned", "url", targetURL, "reason", scanResult.Reason)
+		case "warn":
+			s.logger.Warn("content warned", "url", targetURL, "reason", scanResult.Reason, "decision", scanResult.Decision)
 			w.Header().Set("X-Stronghold-Warning", scanResult.Reason)
+			// Continue to forward response
+		default: // "allow"
+			s.logger.Debug("content allowed despite scan result", "url", targetURL, "decision", scanResult.Decision)
+			// Continue to forward response (headers still present)
 		}
 	} else {
+		// No scan performed or content not scannable
 		w.Header().Set("X-Stronghold-Decision", "ALLOW")
+		w.Header().Set("X-Stronghold-Action", "allow")
+		if !s.config.Scanning.Content.Enabled {
+			w.Header().Set("X-Stronghold-Scan-Type", "disabled")
+		}
 	}
 
 	// Copy response headers

@@ -49,11 +49,20 @@ type PaymentsConfig struct {
 	WalletAddress  string  `yaml:"wallet_address,omitempty"`
 }
 
+// ScanTypeConfig configures behavior for a specific scan type
+type ScanTypeConfig struct {
+	Enabled       bool   `yaml:"enabled"`         // Whether this scan type is active
+	ActionOnWarn  string `yaml:"action_on_warn"`  // "allow", "warn", "block"
+	ActionOnBlock string `yaml:"action_on_block"` // "allow", "warn", "block"
+}
+
 // ScanningConfig holds scanning behavior configuration
 type ScanningConfig struct {
-	Mode           string  `yaml:"mode"`
-	BlockThreshold float64 `yaml:"block_threshold"`
-	FailOpen       bool    `yaml:"fail_open"`
+	Mode           string         `yaml:"mode"`
+	BlockThreshold float64        `yaml:"block_threshold"`
+	FailOpen       bool           `yaml:"fail_open"`
+	Content        ScanTypeConfig `yaml:"content"` // Prompt injection scanning (incoming)
+	Output         ScanTypeConfig `yaml:"output"`  // Credential leak scanning (outgoing)
 }
 
 // LoggingConfig holds logging configuration
@@ -115,6 +124,16 @@ func DefaultConfig() *CLIConfig {
 			Mode:           "smart",
 			BlockThreshold: 0.55,
 			FailOpen:       true,
+			Content: ScanTypeConfig{
+				Enabled:       true,
+				ActionOnWarn:  "warn",
+				ActionOnBlock: "block",
+			},
+			Output: ScanTypeConfig{
+				Enabled:       true,
+				ActionOnWarn:  "warn",
+				ActionOnBlock: "block",
+			},
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -165,7 +184,22 @@ func LoadConfig() (*CLIConfig, error) {
 		config.Version = ConfigVersion
 	}
 
+	// Apply defaults for new ScanTypeConfig fields if not set
+	applyDefaultScanTypeConfig(&config.Scanning.Content)
+	applyDefaultScanTypeConfig(&config.Scanning.Output)
+
 	return &config, nil
+}
+
+// applyDefaultScanTypeConfig sets default values for ScanTypeConfig if not already set
+func applyDefaultScanTypeConfig(cfg *ScanTypeConfig) {
+	// If all fields are zero values, this is a new/uninitialized config
+	// We check ActionOnWarn since Enabled=false could be intentional
+	if cfg.ActionOnWarn == "" {
+		cfg.Enabled = true
+		cfg.ActionOnWarn = "warn"
+		cfg.ActionOnBlock = "block"
+	}
 }
 
 // Save saves the configuration to disk
