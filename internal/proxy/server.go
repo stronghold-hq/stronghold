@@ -26,6 +26,13 @@ type Config struct {
 	Wallet    WalletConfig    `yaml:"wallet"`
 	Scanning  ScanningConfig  `yaml:"scanning"`
 	Logging   LoggingConfig   `yaml:"logging"`
+	CA        CAConfig        `yaml:"ca"`
+}
+
+// CAConfig holds CA certificate configuration for MITM
+type CAConfig struct {
+	CertPath string `yaml:"cert_path"`
+	KeyPath  string `yaml:"key_path"`
 }
 
 // WalletConfig holds wallet configuration
@@ -117,6 +124,10 @@ type Server struct {
 	httpServer     *http.Server
 	listener       net.Listener
 	logger         *slog.Logger
+	httpClient     *http.Client
+	ca             *CA
+	certCache      *CertCache
+	mitm           *MITMHandler
 	requestCount   int64
 	blockedCount   int64
 	warnedCount    int64
@@ -144,10 +155,21 @@ func NewServer(config *Config) (*Server, error) {
 	// Create scanner client
 	scanner := NewScannerClient(config.API.Endpoint, config.Auth.Token)
 
+	// Create standard HTTP client (no socket marks needed - we use user-based filtering)
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		// Don't follow redirects to prevent payment headers from being sent
+		// to attacker-controlled URLs via redirect chains
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
 	s := &Server{
-		config:  config,
-		scanner: scanner,
-		logger:  logger,
+		config:     config,
+		scanner:    scanner,
+		logger:     logger,
+		httpClient: httpClient,
 	}
 
 	// Load wallet if configured
@@ -162,6 +184,32 @@ func NewServer(config *Config) (*Server, error) {
 			s.wallet = w
 			scanner.SetWallet(w)
 			logger.Info("wallet loaded", "address", config.Wallet.Address)
+		}
+	}
+
+	// Load or create CA for MITM
+	if config.CA.CertPath != "" && config.CA.KeyPath != "" {
+		ca, err := LoadCA(config.CA.CertPath, config.CA.KeyPath)
+		if err != nil {
+			logger.Warn("failed to load CA, MITM disabled", "error", err)
+		} else {
+			s.ca = ca
+			s.certCache = NewCertCache(ca)
+			s.mitm = NewMITMHandler(s.certCache, scanner, config, logger)
+			logger.Info("MITM enabled with CA certificate")
+		}
+	} else {
+		// Try default CA location
+		homeDir, _ := os.UserHomeDir()
+		caDir := homeDir + "/.stronghold/ca"
+		ca, err := LoadOrCreateCA(caDir)
+		if err != nil {
+			logger.Warn("failed to load/create CA, MITM disabled", "error", err)
+		} else {
+			s.ca = ca
+			s.certCache = NewCertCache(ca)
+			s.mitm = NewMITMHandler(s.certCache, scanner, config, logger)
+			logger.Info("MITM enabled with CA certificate", "ca_dir", caDir)
 		}
 	}
 
@@ -272,18 +320,184 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.listener = listener
-	s.logger.Info("proxy listening", "addr", addr)
+	s.logger.Info("proxy listening", "addr", addr, "mitm_enabled", s.mitm != nil)
 
-	// Start accepting connections
-	go func() {
-		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			s.logger.Error("server error", "error", err)
-		}
-	}()
+	// Start accepting raw connections for transparent proxy mode
+	go s.acceptConnections(ctx)
 
 	// Wait for context cancellation
 	<-ctx.Done()
 	return nil
+}
+
+// acceptConnections handles incoming TCP connections
+func (s *Server) acceptConnections(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := s.listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return // Context cancelled
+			}
+			s.logger.Error("accept error", "error", err)
+			continue
+		}
+
+		go s.handleConnection(conn)
+	}
+}
+
+// handleConnection handles a single incoming connection
+// It detects whether the traffic is TLS or HTTP and routes accordingly
+func (s *Server) handleConnection(conn net.Conn) {
+	// Set initial read deadline for protocol detection
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	// Peek at first byte to detect protocol
+	buf := make([]byte, 1)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		conn.Close()
+		return
+	}
+
+	// Reset deadline
+	conn.SetReadDeadline(time.Time{})
+
+	// Create a connection that includes the peeked byte
+	prefixedConn := newPrefixedConn(conn, buf[:n])
+
+	// Check if this is TLS (ClientHello starts with 0x16)
+	if buf[0] == 0x16 {
+		// TLS connection - handle with MITM if available
+		if s.mitm != nil {
+			// Get original destination for transparent mode
+			originalDst, err := GetOriginalDst(conn)
+			if err != nil {
+				s.logger.Debug("failed to get original destination, using local addr", "error", err)
+				originalDst = conn.LocalAddr().String()
+			}
+			s.mitm.HandleTLS(prefixedConn, originalDst)
+		} else {
+			// No MITM - just tunnel the connection
+			s.logger.Debug("TLS connection but MITM not available, tunneling")
+			s.tunnelConnection(prefixedConn)
+		}
+	} else {
+		// HTTP connection - handle with HTTP server
+		s.handleHTTPConnection(prefixedConn)
+	}
+}
+
+// handleHTTPConnection handles an HTTP connection
+func (s *Server) handleHTTPConnection(conn net.Conn) {
+	defer conn.Close()
+
+	// Serve HTTP using the standard library server
+	s.httpServer.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return ctx
+	}
+
+	// Create a single-connection listener
+	singleConnListener := &singleConnListener{conn: conn, done: make(chan struct{})}
+	s.httpServer.Serve(singleConnListener)
+}
+
+// tunnelConnection tunnels a TLS connection without MITM
+func (s *Server) tunnelConnection(conn net.Conn) {
+	defer conn.Close()
+
+	// Get original destination
+	originalDst, err := GetOriginalDst(conn)
+	if err != nil {
+		s.logger.Error("failed to get original destination for tunnel", "error", err)
+		return
+	}
+
+	// Connect to destination
+	destConn, err := net.DialTimeout("tcp", originalDst, 10*time.Second)
+	if err != nil {
+		s.logger.Error("failed to connect to destination", "dest", originalDst, "error", err)
+		return
+	}
+	defer destConn.Close()
+
+	// Bidirectional copy
+	done := make(chan struct{})
+	go func() {
+		io.Copy(destConn, conn)
+		close(done)
+	}()
+	io.Copy(conn, destConn)
+	<-done
+}
+
+// prefixedConn wraps a connection with a prefix that was already read
+type prefixedConn struct {
+	net.Conn
+	prefix []byte
+	read   bool
+}
+
+func newPrefixedConn(conn net.Conn, prefix []byte) *prefixedConn {
+	return &prefixedConn{
+		Conn:   conn,
+		prefix: prefix,
+		read:   false,
+	}
+}
+
+func (c *prefixedConn) Read(b []byte) (int, error) {
+	if !c.read && len(c.prefix) > 0 {
+		c.read = true
+		n := copy(b, c.prefix)
+		if n < len(c.prefix) {
+			// Partial read of prefix - shouldn't happen with single byte
+			c.prefix = c.prefix[n:]
+			c.read = false
+		}
+		return n, nil
+	}
+	return c.Conn.Read(b)
+}
+
+// singleConnListener is a net.Listener that serves a single connection
+type singleConnListener struct {
+	conn net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	select {
+	case <-l.done:
+		return nil, net.ErrClosed
+	default:
+	}
+
+	var conn net.Conn
+	l.once.Do(func() {
+		conn = l.conn
+		close(l.done)
+	})
+
+	if conn == nil {
+		return nil, net.ErrClosed
+	}
+	return conn, nil
+}
+
+func (l *singleConnListener) Close() error {
+	return nil
+}
+
+func (l *singleConnListener) Addr() net.Addr {
+	return l.conn.LocalAddr()
 }
 
 // Shutdown gracefully shuts down the server
@@ -363,10 +577,9 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authenticate")
 
-	// Perform the request using marked client (sets SO_MARK to avoid redirect loops)
-	client := NewMarkedClient()
-
-	resp, err := client.Do(outReq)
+	// Perform the request using standard client
+	// (no socket marks needed - we use user-based filtering via nftables/pf)
+	resp, err := s.httpClient.Do(outReq)
 	if err != nil {
 		s.logger.Error("error forwarding request", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
@@ -462,10 +675,10 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	w.Write(body)
 }
 
-// handleConnect handles HTTPS CONNECT requests
+// handleConnect handles HTTPS CONNECT requests (explicit proxy mode)
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
-	// Use marked dialer to avoid redirect loops
-	dialer := &MarkedDialer{Timeout: 1 * time.Second}
+	// Use standard dialer (no socket marks needed - we use user-based filtering)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	destConn, err := dialer.Dial("tcp", r.Host)
 	if err != nil {
 		s.logger.Error("error connecting to host", "host", r.Host, "error", err)
@@ -489,16 +702,22 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Bidirectional copy with panic recovery and error logging
+	// For CONNECT requests with MITM enabled, intercept TLS
+	if s.mitm != nil {
+		s.mitm.HandleTLS(clientConn, r.Host)
+		return
+	}
+
+	// No MITM - bidirectional tunnel
+	done := make(chan struct{})
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error("panic in HTTPS tunnel goroutine (client->dest)", "panic", r)
 			}
 		}()
-		if _, err := io.Copy(destConn, clientConn); err != nil {
-			s.logger.Debug("HTTPS tunnel copy error (client->dest)", "error", err)
-		}
+		io.Copy(destConn, clientConn)
+		close(done)
 	}()
 
 	defer func() {
@@ -506,9 +725,8 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error("panic in HTTPS tunnel (dest->client)", "panic", r)
 		}
 	}()
-	if _, err := io.Copy(clientConn, destConn); err != nil {
-		s.logger.Debug("HTTPS tunnel copy error (dest->client)", "error", err)
-	}
+	io.Copy(clientConn, destConn)
+	<-done
 }
 
 // scanResponse scans the response content

@@ -80,6 +80,12 @@ type UsageStats struct {
 	LastReset     string  `yaml:"last_reset"`
 }
 
+// CAConfig holds CA certificate configuration for MITM
+type CAConfig struct {
+	CertPath string `yaml:"cert_path"`
+	KeyPath  string `yaml:"key_path"`
+}
+
 // CLIConfig holds the complete CLI configuration
 type CLIConfig struct {
 	Version     string         `yaml:"version"`
@@ -91,6 +97,7 @@ type CLIConfig struct {
 	Scanning    ScanningConfig `yaml:"scanning"`
 	Logging     LoggingConfig  `yaml:"logging"`
 	Stats       UsageStats     `yaml:"stats"`
+	CA          CAConfig       `yaml:"ca"`
 	Installed   bool           `yaml:"installed"`
 	InstallDate string         `yaml:"install_date,omitempty"`
 }

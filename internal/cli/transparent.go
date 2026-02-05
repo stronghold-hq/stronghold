@@ -2,19 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 )
-
-// StrongholdMark is the netfilter mark used to identify proxy traffic.
-// The proxy sets this mark on its outbound sockets so nftables/iptables
-// can skip them, preventing infinite redirect loops.
-// 0x2702 = "stronghold" in hex-speak
-const StrongholdMark = 0x2702
 
 // TransparentProxy manages transparent proxying via iptables/nftables/pf
 type TransparentProxy struct {
@@ -130,16 +123,20 @@ func (t *TransparentProxy) statusLinux() (bool, error) {
 // enableIptables sets up iptables rules for transparent proxying
 func (t *TransparentProxy) enableIptables() error {
 	proxyPort := strconv.Itoa(t.config.Proxy.Port)
-	markHex := fmt.Sprintf("0x%x", StrongholdMark)
+
+	// Get stronghold user's UID for user-based filtering
+	uid, err := GetStrongholdUID()
+	if err != nil {
+		return fmt.Errorf("stronghold user not found: run 'stronghold init' first: %w", err)
+	}
 
 	// Create custom chain for stronghold
-	// Use packet mark (set by proxy via SO_MARK) instead of UID to identify proxy traffic.
-	// This ensures all users' traffic goes through the proxy, including root.
+	// Use UID-based filtering to skip proxy's own traffic
 	rules := [][]string{
 		// Create chain if doesn't exist
 		{"iptables", "-t", "nat", "-N", "STRONGHOLD", "-m", "comment", "--comment", "Stronghold transparent proxy"},
-		// Don't redirect traffic from the proxy itself (identified by socket mark)
-		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-m", "mark", "--mark", markHex, "-j", "RETURN"},
+		// Don't redirect traffic from the proxy itself (runs as stronghold user)
+		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-m", "owner", "--uid-owner", uid, "-j", "RETURN"},
 		// Don't redirect localhost traffic (avoid loops)
 		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-d", "127.0.0.1/8", "-j", "RETURN"},
 		// Don't redirect private networks (optional, for local development)
@@ -148,7 +145,7 @@ func (t *TransparentProxy) enableIptables() error {
 		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-d", "192.168.0.0/16", "-j", "RETURN"},
 		// Redirect HTTP traffic to proxy
 		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", proxyPort},
-		// Redirect HTTPS traffic to proxy (proxy handles CONNECT)
+		// Redirect HTTPS traffic to proxy (MITM interception)
 		{"iptables", "-t", "nat", "-A", "STRONGHOLD", "-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", proxyPort},
 		// Add chain to OUTPUT (for local traffic)
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "-j", "STRONGHOLD"},
@@ -182,15 +179,20 @@ func (t *TransparentProxy) disableIptables() error {
 func (t *TransparentProxy) enableNftables() error {
 	proxyPort := strconv.Itoa(t.config.Proxy.Port)
 
+	// Get stronghold user's UID for user-based filtering
+	uid, err := GetStrongholdUID()
+	if err != nil {
+		return fmt.Errorf("stronghold user not found: run 'stronghold init' first: %w", err)
+	}
+
 	// Create nftables script
-	// Use packet mark (set by proxy via SO_MARK) instead of UID to identify proxy traffic.
-	// This ensures all users' traffic goes through the proxy, including root.
+	// Use UID-based filtering (meta skuid) to skip proxy's own traffic
 	nftScript := fmt.Sprintf(`table inet stronghold {
     chain output {
         type nat hook output priority 0; policy accept;
 
-        # Don't redirect proxy's own traffic (identified by socket mark)
-        meta mark 0x%x return
+        # Skip proxy's own traffic (runs as stronghold user)
+        meta skuid %s return
 
         # Don't redirect localhost
         ip daddr 127.0.0.0/8 return
@@ -204,10 +206,10 @@ func (t *TransparentProxy) enableNftables() error {
         # Redirect HTTP to proxy
         tcp dport 80 redirect to :%s
 
-        # Redirect HTTPS to proxy
+        # Redirect HTTPS to proxy (MITM interception)
         tcp dport 443 redirect to :%s
     }
-}`, StrongholdMark, proxyPort, proxyPort)
+}`, uid, proxyPort, proxyPort)
 
 	// Apply nftables config
 	cmd := exec.Command("nft", "-f", "-")
@@ -233,14 +235,13 @@ func (t *TransparentProxy) hasPfctl() bool {
 
 func (t *TransparentProxy) enableDarwin() error {
 	proxyPort := strconv.Itoa(t.config.Proxy.Port)
+	username := StrongholdUsername() // "_stronghold"
 
 	// Create pf configuration
-	// Note: macOS pf doesn't support packet marks like Linux nftables/iptables.
-	// We use a tagged approach instead - proxy traffic is tagged and skipped.
-	// The proxy must set the "stronghold" tag on its outbound connections.
+	// Use user-based filtering to skip proxy's own traffic
 	pfConf := fmt.Sprintf(`# Stronghold transparent proxy
-# Skip proxy's own traffic (tagged by proxy)
-pass out quick proto tcp tagged stronghold
+# Skip proxy's own traffic (runs as _stronghold user)
+pass out quick proto tcp user %s
 
 # Redirect HTTP to proxy
 rdr pass on lo0 inet proto tcp from any to any port 80 -> 127.0.0.1 port %s
@@ -248,7 +249,7 @@ rdr pass on lo0 inet proto tcp from any to any port 443 -> 127.0.0.1 port %s
 
 # Allow redirected traffic
 pass out quick on lo0 inet proto tcp from any to 127.0.0.1 port %s
-`, proxyPort, proxyPort, proxyPort)
+`, username, proxyPort, proxyPort, proxyPort)
 
 	// Write config file
 	configPath := "/etc/pf.stronghold.conf"
@@ -285,44 +286,6 @@ func (t *TransparentProxy) statusDarwin() (bool, error) {
 		return false, err
 	}
 	return strings.Contains(string(output), "stronghold"), nil
-}
-
-// ==================== Proxy Modification ====================
-
-// GetOriginalDst retrieves the original destination for a transparently redirected connection
-// This is used by the proxy to know where to forward the request
-func GetOriginalDst(conn net.Conn) (string, error) {
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		return "", fmt.Errorf("not a TCP connection")
-	}
-
-	file, err := tcpConn.File()
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	fd := file.Fd()
-
-	// Use SO_ORIGINAL_DST to get the original destination
-	// This requires different syscalls on Linux vs other systems
-	if runtime.GOOS == "linux" {
-		return getOriginalDstLinux(int(fd))
-	}
-
-	// For other systems, return the local address (fallback)
-	return conn.LocalAddr().String(), nil
-}
-
-// getOriginalDstLinux uses SO_ORIGINAL_DST to get the original destination
-func getOriginalDstLinux(fd int) (string, error) {
-	// SO_ORIGINAL_DST = 80
-	const SO_ORIGINAL_DST = 80
-
-	// This requires syscall.SockaddrInet4/6 parsing
-	// For now, return error - would need cgo or unsafe for full implementation
-	return "", fmt.Errorf("SO_ORIGINAL_DST requires platform-specific implementation")
 }
 
 // IsTransparentProxyEnabled checks if transparent proxying is currently active

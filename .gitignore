@@ -1,8 +1,8 @@
 # Binaries
 citadel-api
-cli
-proxy
-stronghold
+/cli
+/proxy
+/stronghold
 stronghold-api
 stronghold-proxy
 *.exe

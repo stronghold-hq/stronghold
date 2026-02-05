@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -732,9 +733,12 @@ func (m *InstallModel) runInstallation() tea.Cmd {
 			name string
 			fn   func() error
 		}{
+			{"Creating stronghold user", m.createUser},
 			{"Saving configuration", m.saveConfig},
 			{"Installing proxy binary", m.installProxyBinary},
 			{"Installing CLI binary", m.installCLIBinary},
+			{"Generating CA certificate", m.generateCA},
+			{"Installing CA certificate", m.installCA},
 			{"Configuring system service", m.configureService},
 			{"Starting proxy", m.startProxy},
 			{"Enabling transparent proxy", m.enableTransparentProxy},
@@ -762,9 +766,148 @@ func (m *InstallModel) runInstallation() tea.Cmd {
 	}
 }
 
+// createUser creates the stronghold system user
+func (m *InstallModel) createUser() error {
+	return CreateStrongholdUser()
+}
+
 // saveConfig saves the configuration
 func (m *InstallModel) saveConfig() error {
 	return m.config.Save()
+}
+
+// generateCA generates the root CA certificate for MITM
+func (m *InstallModel) generateCA() error {
+	caDir := filepath.Join(ConfigDir(), "ca")
+	if err := os.MkdirAll(caDir, 0700); err != nil {
+		return fmt.Errorf("failed to create CA directory: %w", err)
+	}
+
+	certPath := filepath.Join(caDir, "ca.crt")
+	keyPath := filepath.Join(caDir, "ca.key")
+
+	// Check if CA already exists
+	if _, err := os.Stat(certPath); err == nil {
+		return nil // CA already exists
+	}
+
+	// Generate CA using openssl (available on both Linux and macOS)
+	// Generate private key
+	keyCmd := exec.Command("openssl", "genrsa", "-out", keyPath, "2048")
+	if output, err := keyCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to generate CA key: %s - %s", err, string(output))
+	}
+
+	// Set restrictive permissions on private key
+	os.Chmod(keyPath, 0600)
+
+	// Generate self-signed CA certificate
+	certCmd := exec.Command("openssl", "req", "-new", "-x509",
+		"-key", keyPath,
+		"-out", certPath,
+		"-days", "3650",
+		"-subj", "/CN=Stronghold Root CA/O=Stronghold Security",
+	)
+	if output, err := certCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to generate CA certificate: %s - %s", err, string(output))
+	}
+
+	// Store CA path in config
+	m.config.CA.CertPath = certPath
+	m.config.CA.KeyPath = keyPath
+
+	return nil
+}
+
+// installCA installs the CA certificate to the system trust store
+func (m *InstallModel) installCA() error {
+	certPath := filepath.Join(ConfigDir(), "ca", "ca.crt")
+	if _, err := os.Stat(certPath); os.IsNotExist(err) {
+		return fmt.Errorf("CA certificate not found at %s", certPath)
+	}
+
+	return InstallCAToTrustStore(certPath)
+}
+
+// InstallCAToTrustStore installs a CA certificate to the system trust store
+func InstallCAToTrustStore(certPath string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return installCALinux(certPath)
+	case "darwin":
+		return installCADarwin(certPath)
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+}
+
+// installCALinux installs CA to Linux system trust store
+func installCALinux(certPath string) error {
+	// Determine the correct CA directory based on distro
+	caDirs := []string{
+		"/usr/local/share/ca-certificates",           // Debian/Ubuntu
+		"/etc/pki/ca-trust/source/anchors",           // RHEL/CentOS/Fedora
+		"/etc/ca-certificates/trust-source/anchors",  // Arch Linux
+	}
+
+	var destDir string
+	for _, dir := range caDirs {
+		if _, err := os.Stat(filepath.Dir(dir)); err == nil {
+			destDir = dir
+			break
+		}
+	}
+
+	if destDir == "" {
+		return fmt.Errorf("no system CA directory found")
+	}
+
+	// Create directory if it doesn't exist
+	os.MkdirAll(destDir, 0755)
+
+	// Copy certificate
+	destPath := filepath.Join(destDir, "stronghold-ca.crt")
+	input, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("failed to read CA certificate: %w", err)
+	}
+
+	if err := os.WriteFile(destPath, input, 0644); err != nil {
+		return fmt.Errorf("failed to write CA certificate: %w", err)
+	}
+
+	// Update CA certificates
+	updateCommands := [][]string{
+		{"update-ca-certificates"},            // Debian/Ubuntu
+		{"update-ca-trust", "extract"},        // RHEL/CentOS/Fedora
+		{"trust", "extract-compat"},           // Arch Linux
+	}
+
+	for _, cmd := range updateCommands {
+		if _, err := exec.LookPath(cmd[0]); err == nil {
+			exec.Command(cmd[0], cmd[1:]...).Run()
+			break
+		}
+	}
+
+	return nil
+}
+
+// installCADarwin installs CA to macOS system trust store
+func installCADarwin(certPath string) error {
+	// Add to system keychain as trusted root
+	cmd := exec.Command("security", "add-trusted-cert",
+		"-d",                                    // Add to admin cert store
+		"-r", "trustRoot",                       // Trust as root CA
+		"-k", "/Library/Keychains/System.keychain",
+		certPath,
+	)
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to install CA: %s - %s", err, string(output))
+	}
+
+	return nil
 }
 
 // installProxyBinary installs the proxy binary
@@ -1028,4 +1171,107 @@ func generateSimulatedAccountNumber() string {
 		time.Sleep(1 * time.Millisecond)
 	}
 	return fmt.Sprintf("%s-%s-%s-%s", parts[0], parts[1], parts[2], parts[3])
+}
+
+// StrongholdUsername returns the username for the stronghold service user
+func StrongholdUsername() string {
+	if runtime.GOOS == "darwin" {
+		return "_stronghold" // macOS convention: underscore prefix for system users
+	}
+	return "stronghold"
+}
+
+// CreateStrongholdUser creates the dedicated system user for the proxy service
+func CreateStrongholdUser() error {
+	switch runtime.GOOS {
+	case "linux":
+		return createLinuxUser()
+	case "darwin":
+		return createDarwinUser()
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+}
+
+// createLinuxUser creates the stronghold system user on Linux
+func createLinuxUser() error {
+	username := StrongholdUsername()
+
+	// Check if user already exists
+	if _, err := user.Lookup(username); err == nil {
+		return nil // User already exists
+	}
+
+	// Create system user (no home directory, no login shell)
+	cmd := exec.Command("useradd",
+		"--system",
+		"--no-create-home",
+		"--shell", "/usr/sbin/nologin",
+		"--comment", "Stronghold Proxy Service",
+		username)
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create user: %s - %s", err, string(output))
+	}
+
+	return nil
+}
+
+// createDarwinUser creates the _stronghold system user on macOS
+func createDarwinUser() error {
+	username := StrongholdUsername() // "_stronghold"
+
+	// Check if user already exists
+	if _, err := user.Lookup(username); err == nil {
+		return nil // User already exists
+	}
+
+	// Find an available UID in the system range (200-399)
+	uid := findAvailableUID()
+	if uid == 0 {
+		return fmt.Errorf("no available UID found for system user")
+	}
+
+	// Create the user using dscl (Directory Service command line)
+	commands := [][]string{
+		{"dscl", ".", "-create", "/Users/" + username},
+		{"dscl", ".", "-create", "/Users/" + username, "UserShell", "/usr/bin/false"},
+		{"dscl", ".", "-create", "/Users/" + username, "RealName", "Stronghold Proxy Service"},
+		{"dscl", ".", "-create", "/Users/" + username, "UniqueID", fmt.Sprintf("%d", uid)},
+		{"dscl", ".", "-create", "/Users/" + username, "PrimaryGroupID", "20"}, // staff group
+		{"dscl", ".", "-create", "/Users/" + username, "NFSHomeDirectory", "/var/empty"},
+	}
+
+	for _, args := range commands {
+		cmd := exec.Command(args[0], args[1:]...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to create user (%v): %s - %s", args, err, string(output))
+		}
+	}
+
+	return nil
+}
+
+// findAvailableUID finds an available UID in the macOS system user range
+func findAvailableUID() int {
+	// macOS system users typically use UIDs 200-399
+	for uid := 399; uid >= 200; uid-- {
+		// Check if UID is in use
+		cmd := exec.Command("dscl", ".", "-search", "/Users", "UniqueID", fmt.Sprintf("%d", uid))
+		output, _ := cmd.Output()
+		if len(strings.TrimSpace(string(output))) == 0 {
+			return uid
+		}
+	}
+	return 0
+}
+
+// GetStrongholdUID returns the UID of the stronghold user
+func GetStrongholdUID() (string, error) {
+	username := StrongholdUsername()
+	u, err := user.Lookup(username)
+	if err != nil {
+		return "", fmt.Errorf("stronghold user not found: run 'stronghold init' first")
+	}
+	return u.Uid, nil
 }

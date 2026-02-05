@@ -62,10 +62,15 @@ type ScannerClient struct {
 
 // NewScannerClient creates a new scanner client
 func NewScannerClient(baseURL, token string) *ScannerClient {
-	// Use marked client to avoid nftables redirect loops
-	client := NewMarkedClient()
-	// Set timeout for API calls - allows headroom for ML inference under load
-	client.Timeout = 5 * time.Second
+	// Use standard client (no socket marks needed - we use user-based filtering)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		// Don't follow redirects to prevent payment headers from being sent
+		// to attacker-controlled URLs via redirect chains
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	return &ScannerClient{
 		baseURL:        baseURL,

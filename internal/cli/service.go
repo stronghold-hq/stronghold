@@ -190,6 +190,7 @@ func (s *ServiceManager) UninstallService() error {
 // installLinuxService installs systemd service on Linux
 func (s *ServiceManager) installLinuxService() error {
 	proxyBinary := s.getProxyBinaryPath()
+	username := StrongholdUsername()
 
 	// Check if we can use system systemd or user systemd
 	serviceDir := "/etc/systemd/system"
@@ -202,20 +203,25 @@ func (s *ServiceManager) installLinuxService() error {
 	}
 
 	if useSystemd {
+		// System service runs as stronghold user for transparent proxy filtering
 		serviceContent := fmt.Sprintf(`[Unit]
 Description=Stronghold Proxy Service
 After=network.target
 
 [Service]
 Type=simple
+User=%s
+Group=%s
 EnvironmentFile=-/etc/systemd/system/stronghold-proxy.env
 ExecStart=%s
 Restart=always
 RestartSec=5
+# Allow binding to privileged ports if needed
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
-`, proxyBinary)
+`, username, username, proxyBinary)
 
 		servicePath := filepath.Join(serviceDir, "stronghold-proxy.service")
 		if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
@@ -225,7 +231,7 @@ WantedBy=multi-user.target
 		// Reload systemd
 		exec.Command("systemctl", "daemon-reload").Run()
 	} else {
-		// User-mode systemd
+		// User-mode systemd - still runs as current user but firewall rules handle filtering
 		userServiceDir := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user")
 		os.MkdirAll(userServiceDir, 0755)
 
@@ -284,8 +290,49 @@ func (s *ServiceManager) uninstallLinuxService() error {
 func (s *ServiceManager) installDarwinService() error {
 	proxyBinary := s.getProxyBinaryPath()
 	configDir := ConfigDir()
+	username := StrongholdUsername() // "_stronghold"
 
+	// System-level daemon that runs as _stronghold user
 	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stronghold.proxy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+    </array>
+    <key>UserName</key>
+    <string>%s</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>STRONGHOLD_CONFIG</key>
+        <string>%s</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/stronghold-proxy.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/stronghold-proxy.log</string>
+</dict>
+</plist>
+`, proxyBinary, username, ConfigPath())
+
+	// Install as system daemon in /Library/LaunchDaemons (requires root)
+	launchDaemonsDir := "/Library/LaunchDaemons"
+	plistPath := filepath.Join(launchDaemonsDir, "com.stronghold.proxy.plist")
+
+	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
+		// Fall back to user LaunchAgent if we can't write to system location
+		launchAgentsDir := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents")
+		os.MkdirAll(launchAgentsDir, 0755)
+
+		// User agent doesn't have UserName key
+		userPlistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -312,12 +359,10 @@ func (s *ServiceManager) installDarwinService() error {
 </plist>
 `, proxyBinary, ConfigPath(), configDir, configDir)
 
-	launchAgentsDir := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents")
-	os.MkdirAll(launchAgentsDir, 0755)
-
-	plistPath := filepath.Join(launchAgentsDir, "com.stronghold.proxy.plist")
-	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
-		return fmt.Errorf("failed to write plist file: %w", err)
+		plistPath = filepath.Join(launchAgentsDir, "com.stronghold.proxy.plist")
+		if err := os.WriteFile(plistPath, []byte(userPlistContent), 0644); err != nil {
+			return fmt.Errorf("failed to write plist file: %w", err)
+		}
 	}
 
 	return nil
@@ -325,13 +370,19 @@ func (s *ServiceManager) installDarwinService() error {
 
 // uninstallDarwinService removes launchd service on macOS
 func (s *ServiceManager) uninstallDarwinService() error {
-	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.stronghold.proxy.plist")
+	// Try system daemon first
+	systemPlistPath := "/Library/LaunchDaemons/com.stronghold.proxy.plist"
+	if _, err := os.Stat(systemPlistPath); err == nil {
+		exec.Command("launchctl", "unload", systemPlistPath).Run()
+		os.Remove(systemPlistPath)
+	}
 
-	// Unload if loaded
-	exec.Command("launchctl", "unload", plistPath).Run()
-
-	// Remove plist
-	os.Remove(plistPath)
+	// Also try user agent
+	userPlistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.stronghold.proxy.plist")
+	if _, err := os.Stat(userPlistPath); err == nil {
+		exec.Command("launchctl", "unload", userPlistPath).Run()
+		os.Remove(userPlistPath)
+	}
 
 	return nil
 }
