@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -106,7 +108,7 @@ func (m *MITMHandler) proxyHTTPS(clientConn, serverConn net.Conn, host string) e
 
 		// Scan request body if it exists (for prompt injection in POST data)
 		var requestBody []byte
-		if req.Body != nil && req.ContentLength > 0 && m.config.Scanning.Content.Enabled {
+		if req.Body != nil && req.ContentLength != 0 && m.config.Scanning.Content.Enabled {
 			requestBody, _ = io.ReadAll(req.Body)
 			req.Body.Close()
 
@@ -136,42 +138,54 @@ func (m *MITMHandler) proxyHTTPS(clientConn, serverConn net.Conn, host string) e
 			return fmt.Errorf("failed to read response: %w", err)
 		}
 
-		// Read and potentially scan response body
-		responseBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		// Scan response content for threats
-		var scanResult *ScanResult
+		// Check if response should be scanned before reading the full body
 		contentType := resp.Header.Get("Content-Type")
-		if m.config.Scanning.Content.Enabled && len(responseBody) > 0 && len(responseBody) < 1024*1024 {
-			if ShouldScanContentType(contentType) && !IsBinaryContentType(contentType) {
+		shouldScan := m.config.Scanning.Content.Enabled &&
+			ShouldScanContentType(contentType) && !IsBinaryContentType(contentType)
+
+		if shouldScan {
+			// Read body for scanning (with 1MB limit + 1 byte to detect oversized)
+			responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+			resp.Body.Close()
+			if err != nil {
+				return fmt.Errorf("failed to read response body: %w", err)
+			}
+
+			// Scan if within size limit
+			var scanResult *ScanResult
+			if len(responseBody) > 0 && len(responseBody) <= 1024*1024 {
 				scanResult = m.scanContent(responseBody, req.URL.String(), contentType)
 			}
-		}
 
-		// Add Stronghold headers
-		resp.Header.Set("X-Stronghold-Proxy", "mitm")
-		if scanResult != nil {
-			resp.Header.Set("X-Stronghold-Decision", string(scanResult.Decision))
-			resp.Header.Set("X-Stronghold-Reason", scanResult.Reason)
+			// Add Stronghold headers
+			resp.Header.Set("X-Stronghold-Proxy", "mitm")
+			if scanResult != nil {
+				resp.Header.Set("X-Stronghold-Decision", string(scanResult.Decision))
+				resp.Header.Set("X-Stronghold-Reason", scanResult.Reason)
 
-			// Block if needed
-			action := getAction(scanResult.Decision, m.config.Scanning.Content)
-			if action == "block" {
-				m.sendBlockResponse(clientConn, scanResult, req)
-				continue
+				// Block if needed
+				action := getAction(scanResult.Decision, m.config.Scanning.Content)
+				if action == "block" {
+					m.sendBlockResponse(clientConn, scanResult, req)
+					continue
+				}
 			}
-		}
 
-		// Forward response to client with the read body
-		resp.Body = io.NopCloser(strings.NewReader(string(responseBody)))
-		resp.ContentLength = int64(len(responseBody))
+			// Forward response to client with the read body
+			resp.Body = io.NopCloser(bytes.NewReader(responseBody))
+			resp.ContentLength = int64(len(responseBody))
 
-		if err := resp.Write(clientConn); err != nil {
-			return fmt.Errorf("failed to forward response: %w", err)
+			if err := resp.Write(clientConn); err != nil {
+				return fmt.Errorf("failed to forward response: %w", err)
+			}
+		} else {
+			// Non-scannable content: stream directly without buffering
+			resp.Header.Set("X-Stronghold-Proxy", "mitm")
+			if err := resp.Write(clientConn); err != nil {
+				resp.Body.Close()
+				return fmt.Errorf("failed to forward response: %w", err)
+			}
+			resp.Body.Close()
 		}
 	}
 }
@@ -200,11 +214,16 @@ func (m *MITMHandler) scanContent(body []byte, sourceURL, contentType string) *S
 func (m *MITMHandler) sendBlockResponse(conn net.Conn, result *ScanResult, req *http.Request) {
 	m.logger.Warn("content blocked", "url", req.URL.String(), "reason", result.Reason)
 
-	body := fmt.Sprintf(`{
-	"error": "Content blocked by Stronghold security scan",
-	"reason": "%s",
-	"url": "%s"
-}`, result.Reason, req.URL.String())
+	bodyBytes, _ := json.Marshal(struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+		URL    string `json:"url"`
+	}{
+		Error:  "Content blocked by Stronghold security scan",
+		Reason: result.Reason,
+		URL:    req.URL.String(),
+	})
+	body := string(bodyBytes)
 
 	resp := &http.Response{
 		StatusCode:    http.StatusForbidden,
@@ -223,23 +242,4 @@ func (m *MITMHandler) sendBlockResponse(conn net.Conn, result *ScanResult, req *
 	resp.Header.Set("X-Stronghold-Reason", result.Reason)
 
 	resp.Write(conn)
-}
-
-// prefixConn wraps a connection with a prefix that was already read
-type prefixConn struct {
-	net.Conn
-	prefix []byte
-	reader io.Reader
-}
-
-func newPrefixConn(conn net.Conn, prefix []byte) *prefixConn {
-	return &prefixConn{
-		Conn:   conn,
-		prefix: prefix,
-		reader: io.MultiReader(strings.NewReader(string(prefix)), conn),
-	}
-}
-
-func (c *prefixConn) Read(b []byte) (int, error) {
-	return c.reader.Read(b)
 }

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -474,8 +475,13 @@ func (s *Server) tunnelConnection(conn net.Conn) {
 	// Bidirectional copy
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("panic in tunnel goroutine", "panic", r)
+			}
+			close(done)
+		}()
 		io.Copy(destConn, tunnelConn)
-		close(done)
 	}()
 	io.Copy(tunnelConn, destConn)
 	<-done
@@ -546,6 +552,9 @@ func (l *singleConnListener) Addr() net.Addr {
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.certCache != nil {
+		s.certCache.Stop()
+	}
 	if s.listener != nil {
 		return s.httpServer.Shutdown(ctx)
 	}
@@ -682,13 +691,19 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 		switch action {
 		case "block":
 			s.logger.Warn("content blocked", "url", targetURL, "reason", scanResult.Reason, "decision", scanResult.Decision)
+			blockBody, _ := json.Marshal(struct {
+				Error             string `json:"error"`
+				Reason            string `json:"reason"`
+				RequestID         string `json:"request_id"`
+				RecommendedAction string `json:"recommended_action"`
+			}{
+				Error:             "Content blocked by Stronghold security scan",
+				Reason:            scanResult.Reason,
+				RequestID:         requestID,
+				RecommendedAction: scanResult.RecommendedAction,
+			})
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(fmt.Sprintf(`{
-	"error": "Content blocked by Stronghold security scan",
-	"reason": "%s",
-	"request_id": "%s",
-	"recommended_action": "%s"
-}`, scanResult.Reason, requestID, scanResult.RecommendedAction)))
+			w.Write(blockBody)
 			return
 		case "warn":
 			s.logger.Warn("content warned", "url", targetURL, "reason", scanResult.Reason, "decision", scanResult.Decision)
@@ -818,20 +833,22 @@ func (s *Server) scanResponse(body []byte, sourceURL, contentType string) *ScanR
 // handleHealth handles health check requests
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
-	stats := map[string]interface{}{
-		"status":         "healthy",
-		"requests_total": s.requestCount,
-		"blocked":        s.blockedCount,
-		"warned":         s.warnedCount,
+	stats := struct {
+		Status        string `json:"status"`
+		RequestsTotal int64  `json:"requests_total"`
+		Blocked       int64  `json:"blocked"`
+		Warned        int64  `json:"warned"`
+	}{
+		Status:        "healthy",
+		RequestsTotal: s.requestCount,
+		Blocked:       s.blockedCount,
+		Warned:        s.warnedCount,
 	}
 	s.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	// Simple JSON encoding
-	fmt.Fprintf(w, `{"status":"%s","requests_total":%d,"blocked":%d,"warned":%d}`,
-		stats["status"], stats["requests_total"], stats["blocked"], stats["warned"])
+	json.NewEncoder(w).Encode(stats)
 }
 
 // generateRequestID generates a simple request ID
