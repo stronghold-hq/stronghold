@@ -3,6 +3,7 @@ citadel-api
 /cli
 /proxy
 /stronghold
+/api
 stronghold-api
 stronghold-proxy
 *.exe

@@ -98,6 +98,19 @@ For ANY implementation, you MUST:
 
 This applies to EVERYTHING: APIs, libraries, protocols, file formats, CLI tools, database queries, etc. If you don't know how something works, research it first. Do not iterate by trial and error unless the user explicitly asks you to.
 
+## Always Check Current State Before Planning
+
+**CRITICAL: Before writing ANY plan, ALWAYS check the current state of the codebase first.**
+
+- Read `git log` to see recent commits - work may already be done
+- If `git log` doesn't yield enough insight, read the actual source files and check relevant parts of the codebase for more information
+- Never write a plan based on an outdated understanding from a previous conversation or summary
+- Context summaries from prior sessions may be stale - the codebase is the source of truth
+- If resuming a conversation, assume the codebase may have changed since the last session
+- **NEVER assume - always verify.** If you're unsure whether something exists or has been done, check the code. When possible, confirm before acting.
+
+**This is non-negotiable.** Writing a plan for already-completed work wastes time and erodes trust.
+
 ## Architecture
 
 ```
