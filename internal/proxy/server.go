@@ -640,25 +640,72 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	}
 	defer resp.Body.Close()
 
-	// Read the response body
-	body, err := io.ReadAll(resp.Body)
+	// Add base Stronghold headers
+	requestID := generateRequestID()
+	w.Header().Set("X-Stronghold-Request-ID", requestID)
+	w.Header().Set("X-Stronghold-Scan-Latency", fmt.Sprintf("%dms", time.Since(start).Milliseconds()))
+
+	// Check content type BEFORE reading the body to avoid buffering large binaries
+	contentType := resp.Header.Get("Content-Type")
+	shouldScan := s.config.Scanning.Content.Enabled &&
+		ShouldScanContentType(contentType) && !IsBinaryContentType(contentType)
+
+	if !shouldScan {
+		// Non-scannable content: stream directly without buffering
+		w.Header().Set("X-Stronghold-Decision", "ALLOW")
+		w.Header().Set("X-Stronghold-Action", "allow")
+		if !s.config.Scanning.Content.Enabled {
+			w.Header().Set("X-Stronghold-Scan-Type", "disabled")
+		}
+
+		// Copy response headers
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			s.logger.Error("error streaming response", "error", err, "requestID", requestID)
+		}
+		return
+	}
+
+	// Scannable content: read with 1MB limit (+ 1 byte to detect oversized)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
 	if err != nil {
 		s.logger.Error("error reading response body", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 
-	// Add base Stronghold headers
-	requestID := generateRequestID()
-	w.Header().Set("X-Stronghold-Request-ID", requestID)
-	w.Header().Set("X-Stronghold-Scan-Latency", fmt.Sprintf("%dms", time.Since(start).Milliseconds()))
+	// If body exceeds 1MB, skip scanning and forward as-is
+	if len(body) > 1024*1024 {
+		w.Header().Set("X-Stronghold-Decision", "ALLOW")
+		w.Header().Set("X-Stronghold-Action", "allow")
 
-	// Scan the response if content scanning is enabled
-	contentType := resp.Header.Get("Content-Type")
-	var scanResult *ScanResult
-	if s.config.Scanning.Content.Enabled {
-		scanResult = s.scanResponse(body, targetURL, contentType)
+		// Copy response headers
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+
+		w.WriteHeader(resp.StatusCode)
+		if _, err := w.Write(body); err != nil {
+			s.logger.Error("error writing oversized response body", "error", err, "requestID", requestID)
+			return
+		}
+		// Write any remaining bytes beyond what LimitReader returned
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			s.logger.Error("error streaming response", "error", err, "requestID", requestID)
+		}
+		return
 	}
+
+	// Scan the response body
+	scanResult := s.scanResponse(body, targetURL, contentType)
 
 	// Determine action based on scan result and config
 	var action string
@@ -714,12 +761,9 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 			// Continue to forward response (headers still present)
 		}
 	} else {
-		// No scan performed or content not scannable
+		// scanResponse returned nil (content not scannable or no scanner configured)
 		w.Header().Set("X-Stronghold-Decision", "ALLOW")
 		w.Header().Set("X-Stronghold-Action", "allow")
-		if !s.config.Scanning.Content.Enabled {
-			w.Header().Set("X-Stronghold-Scan-Type", "disabled")
-		}
 	}
 
 	// Copy response headers
