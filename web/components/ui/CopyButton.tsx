@@ -25,7 +25,7 @@ export function CopyButton({ text, className = '', iconClassName = 'w-4 h-4' }: 
     <button
       onClick={handleCopy}
       className={`p-1.5 text-gray-400 hover:text-white transition-colors ${className}`}
-      title="Copy"
+      title={copied ? "Copied" : "Copy"}
     >
       {copied ? (
         <Check className={`${iconClassName} text-[#00D4AA]`} />

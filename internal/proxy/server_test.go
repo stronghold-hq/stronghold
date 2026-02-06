@@ -1,9 +1,14 @@
 package proxy
 
 import (
+	"bufio"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,6 +102,9 @@ func TestHandleHTTP_ForwardsRequest(t *testing.T) {
 	if rec.Header().Get("X-Stronghold-Decision") != "ALLOW" {
 		t.Errorf("expected X-Stronghold-Decision=ALLOW, got %q", rec.Header().Get("X-Stronghold-Decision"))
 	}
+	if rec.Header().Get("X-Stronghold-Scan-Type") != "skipped-unscannable" {
+		t.Errorf("expected X-Stronghold-Scan-Type=skipped-unscannable, got %q", rec.Header().Get("X-Stronghold-Scan-Type"))
+	}
 
 	// Verify upstream headers are forwarded
 	if rec.Header().Get("X-Custom-Header") != "upstream-value" {
@@ -173,6 +181,9 @@ func TestHandleHTTP_BlocksContent(t *testing.T) {
 	if rec.Header().Get("X-Stronghold-Action") != "block" {
 		t.Errorf("expected X-Stronghold-Action=block, got %q", rec.Header().Get("X-Stronghold-Action"))
 	}
+	if rec.Header().Get("X-Stronghold-Scan-Type") != "content" {
+		t.Errorf("expected X-Stronghold-Scan-Type=content, got %q", rec.Header().Get("X-Stronghold-Scan-Type"))
+	}
 }
 
 func TestHandleHTTP_StreamsBinaryContent(t *testing.T) {
@@ -220,6 +231,9 @@ func TestHandleHTTP_StreamsBinaryContent(t *testing.T) {
 	// Verify binary content was streamed without scanning
 	if rec.Header().Get("X-Stronghold-Decision") != "ALLOW" {
 		t.Errorf("expected X-Stronghold-Decision=ALLOW, got %q", rec.Header().Get("X-Stronghold-Decision"))
+	}
+	if rec.Header().Get("X-Stronghold-Scan-Type") != "skipped-unscannable" {
+		t.Errorf("expected X-Stronghold-Scan-Type=skipped-unscannable, got %q", rec.Header().Get("X-Stronghold-Scan-Type"))
 	}
 
 	// Scanner should NOT have been called
@@ -466,6 +480,10 @@ func TestHandleHTTP_WarnDecision(t *testing.T) {
 		t.Errorf("expected X-Stronghold-Decision=WARN, got %q", rec.Header().Get("X-Stronghold-Decision"))
 	}
 
+	if rec.Header().Get("X-Stronghold-Scan-Type") != "content" {
+		t.Errorf("expected X-Stronghold-Scan-Type=content, got %q", rec.Header().Get("X-Stronghold-Scan-Type"))
+	}
+
 	// Verify response body contains the upstream content
 	body := rec.Body.String()
 	if !strings.Contains(body, "Suspicious but not blocked") {
@@ -547,5 +565,292 @@ func TestHandleHTTP_OversizedSkipsScan(t *testing.T) {
 	// Verify scanner was not called
 	if scanCalled.Load() != 0 {
 		t.Errorf("expected scanner not to be called for oversized content, was called %d times", scanCalled.Load())
+	}
+
+	if rec.Header().Get("X-Stronghold-Scan-Type") != "skipped-oversized" {
+		t.Errorf("expected X-Stronghold-Scan-Type=skipped-oversized, got %q", rec.Header().Get("X-Stronghold-Scan-Type"))
+	}
+}
+
+// hijackResponseWriter wraps httptest.ResponseRecorder to implement http.Hijacker.
+// The hijacked connection comes from a net.Pipe, allowing tests to read/write
+// the raw connection after the HTTP handler calls Hijack().
+type hijackResponseWriter struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (h *hijackResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	rw := bufio.NewReadWriter(bufio.NewReader(h.conn), bufio.NewWriter(h.conn))
+	return h.conn, rw, nil
+}
+
+func TestHandleConnect_BasicTunnel(t *testing.T) {
+	// Start a TLS upstream server that echoes request body back
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		body, _ := io.ReadAll(r.Body)
+		w.Write(body)
+	}))
+	defer upstream.Close()
+
+	// Parse the upstream address (host:port)
+	upstreamAddr := upstream.Listener.Addr().String()
+
+	config := newTestConfig("http://localhost:1")
+	s := newTestServer(t, config)
+	// Ensure MITM is nil so we get pure tunnel behavior
+	s.mitm = nil
+
+	// Create net.Pipe: serverConn is what the handler sees as the hijacked connection,
+	// clientConn is what our test uses to send/receive data through the tunnel
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	rec := httptest.NewRecorder()
+	hw := &hijackResponseWriter{ResponseRecorder: rec, conn: serverConn}
+
+	// Create CONNECT request targeting the upstream TLS server
+	req := httptest.NewRequest(http.MethodConnect, upstreamAddr, nil)
+	req.Host = upstreamAddr
+
+	// Run handler in goroutine since it blocks until tunnel closes
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.handleConnect(hw, req)
+	}()
+
+	// The handler writes "200 OK" to the ResponseRecorder before hijacking,
+	// but after hijack the raw tunnel is on clientConn.
+	// Use TLS over the tunnel to talk to the upstream server.
+	tlsConn := tls.Client(clientConn, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+
+	// Manually perform the TLS handshake
+	if err := tlsConn.Handshake(); err != nil {
+		t.Fatalf("TLS handshake through tunnel failed: %v", err)
+	}
+
+	// Write an HTTP request directly over the TLS connection
+	reqLine := "POST /echo HTTP/1.1\r\nHost: " + upstreamAddr + "\r\nContent-Length: 12\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nhello-tunnel"
+	if _, err := tlsConn.Write([]byte(reqLine)); err != nil {
+		t.Fatalf("failed to write HTTP request through tunnel: %v", err)
+	}
+
+	// Read the HTTP response
+	br := bufio.NewReader(tlsConn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("failed to read HTTP response through tunnel: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if string(respBody) != "hello-tunnel" {
+		t.Errorf("expected echo body 'hello-tunnel', got %q", string(respBody))
+	}
+
+	// Close connections to terminate the tunnel
+	tlsConn.Close()
+	clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tunnel goroutine did not finish within 5 seconds")
+	}
+
+	// Verify the handler wrote 200 before hijacking
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected recorder status 200, got %d", rec.Code)
+	}
+}
+
+func TestHandleConnect_DialFailure(t *testing.T) {
+	config := newTestConfig("http://localhost:1")
+	s := newTestServer(t, config)
+
+	// Listen on a port and immediately close the listener to get a port that
+	// will refuse connections quickly (much faster than non-routable address timeout).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to get ephemeral port: %v", err)
+	}
+	closedAddr := ln.Addr().String()
+	ln.Close()
+
+	req := httptest.NewRequest(http.MethodConnect, closedAddr, nil)
+	req.Host = closedAddr
+
+	rec := httptest.NewRecorder()
+
+	s.handleConnect(rec, req)
+
+	// Should get 502 Bad Gateway
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("expected status 502, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Bad Gateway") {
+		t.Errorf("expected body to contain 'Bad Gateway', got %q", body)
+	}
+}
+
+func TestHandleConnect_MITMIntercept(t *testing.T) {
+	// Create upstream TLS server that returns a known response
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("mitm-upstream-response"))
+	}))
+	defer upstream.Close()
+
+	upstreamAddr := upstream.Listener.Addr().String()
+	_, upstreamPort, _ := net.SplitHostPort(upstreamAddr)
+	// Use "localhost" instead of the raw IP so that GenerateCert produces a
+	// certificate with a DNS SAN that x509.Verify can validate.
+	upstreamHost := "localhost"
+
+	// Create real CA and cert cache for MITM
+	ca, err := NewCA()
+	if err != nil {
+		t.Fatalf("failed to create CA: %v", err)
+	}
+	certCache := NewCertCache(ca)
+	defer certCache.Stop()
+
+	// Create scanner mock (allow everything)
+	scanner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ScanResult{Decision: DecisionAllow})
+	}))
+	defer scanner.Close()
+
+	config := newTestConfig(scanner.URL)
+
+	// Set up MITM handler - but we need to customize it because the MITM handler
+	// will try to connect to the real upstream. We need to make the upstream server
+	// accept connections from the MITM handler. The issue is that MITM's HandleTLS
+	// dials the original destination with tls.Dial, which will fail because the
+	// upstream uses a self-signed cert.
+	//
+	// Instead, we test the MITM TLS handshake on the client side only.
+	// We verify that the MITM handler performs a TLS handshake using a cert
+	// signed by our CA.
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	scannerClient := NewScannerClient(scanner.URL, "")
+	mitmHandler := NewMITMHandler(certCache, scannerClient, config, logger)
+
+	// Create a pipe: serverSide is given to HandleTLS as the clientConn,
+	// testSide is what our test uses to perform a TLS handshake.
+	serverSide, testSide := net.Pipe()
+	defer testSide.Close()
+
+	// Run HandleTLS in a goroutine - it will try to TLS-handshake with our test
+	// then attempt to dial the real upstream (which will fail because of self-signed cert).
+	// We only care that the TLS handshake with our test side succeeds using the CA cert.
+	mitmDone := make(chan error, 1)
+	go func() {
+		mitmDone <- mitmHandler.HandleTLS(serverSide, upstreamHost+":"+upstreamPort)
+	}()
+
+	// Create a TLS client that trusts our test CA
+	caPool := x509.NewCertPool()
+	caPool.AddCert(ca.cert)
+
+	tlsConn := tls.Client(testSide, &tls.Config{
+		ServerName: "localhost",
+		RootCAs:    caPool,
+	})
+
+	err = tlsConn.Handshake()
+	if err != nil {
+		t.Fatalf("TLS handshake with MITM-generated cert failed: %v", err)
+	}
+
+	// Verify the certificate was signed by our CA
+	state := tlsConn.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		t.Fatal("expected at least one peer certificate")
+	}
+	peerCert := state.PeerCertificates[0]
+	// Verify the cert chains to our CA with hostname verification
+	_, verifyErr := peerCert.Verify(x509.VerifyOptions{
+		Roots:   caPool,
+		DNSName: "localhost",
+	})
+	if verifyErr != nil {
+		t.Errorf("peer certificate not signed by test CA: %v", verifyErr)
+	}
+
+	// Verify the cert was generated for the expected host
+	if peerCert.Subject.CommonName != upstreamHost {
+		t.Errorf("expected cert CN=%s, got %s", upstreamHost, peerCert.Subject.CommonName)
+	}
+
+	// Clean up - the MITM handler will fail when trying to dial upstream
+	// (self-signed cert), which is expected
+	tlsConn.Close()
+	testSide.Close()
+
+	// Wait for HandleTLS to finish (it should error on upstream dial)
+	mitmErr := <-mitmDone
+	// We expect an error from dialing the test server (self-signed cert or connection reset)
+	// This is fine - we verified the client-side TLS handshake works
+	if mitmErr == nil {
+		t.Log("HandleTLS returned nil error (upstream dial succeeded unexpectedly)")
+	}
+}
+
+func TestHandleConnect_HijackNotSupported(t *testing.T) {
+	// Start a real TCP listener so that Dial succeeds
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer listener.Close()
+	targetAddr := listener.Addr().String()
+
+	// Accept and immediately close connections so the dial succeeds
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	config := newTestConfig("http://localhost:1")
+	s := newTestServer(t, config)
+	s.mitm = nil
+
+	// Use plain httptest.NewRecorder which does NOT implement http.Hijacker
+	rec := httptest.NewRecorder()
+
+	req := httptest.NewRequest(http.MethodConnect, targetAddr, nil)
+	req.Host = targetAddr
+
+	s.handleConnect(rec, req)
+
+	// TODO: handleConnect writes 200 before checking Hijacker support.
+	// In production this means the client sees 200 followed by an error body.
+	// Consider checking Hijacker support before writing the status line.
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200 (written before hijack check), got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Hijacking not supported") {
+		t.Errorf("expected body to contain 'Hijacking not supported', got %q", body)
 	}
 }

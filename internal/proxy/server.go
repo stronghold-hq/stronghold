@@ -656,14 +656,12 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 		w.Header().Set("X-Stronghold-Action", "allow")
 		if !s.config.Scanning.Content.Enabled {
 			w.Header().Set("X-Stronghold-Scan-Type", "disabled")
+		} else {
+			w.Header().Set("X-Stronghold-Scan-Type", "skipped-unscannable")
 		}
 
 		// Copy response headers
-		for key, values := range resp.Header {
-			for _, value := range values {
-				w.Header().Add(key, value)
-			}
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 
 		w.WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(w, resp.Body); err != nil {
@@ -684,13 +682,10 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 	if len(body) > 1024*1024 {
 		w.Header().Set("X-Stronghold-Decision", "ALLOW")
 		w.Header().Set("X-Stronghold-Action", "allow")
+		w.Header().Set("X-Stronghold-Scan-Type", "skipped-oversized")
 
 		// Copy response headers
-		for key, values := range resp.Header {
-			for _, value := range values {
-				w.Header().Add(key, value)
-			}
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(body); err != nil {
@@ -764,14 +759,11 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, start time.T
 		// scanResponse returned nil (content not scannable or no scanner configured)
 		w.Header().Set("X-Stronghold-Decision", "ALLOW")
 		w.Header().Set("X-Stronghold-Action", "allow")
+		w.Header().Set("X-Stronghold-Scan-Type", "skipped-not-scannable")
 	}
 
 	// Copy response headers
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
+	copyResponseHeaders(w.Header(), resp.Header)
 
 	// Write response
 	w.WriteHeader(resp.StatusCode)
@@ -893,6 +885,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(stats)
+}
+
+// copyResponseHeaders copies all headers from src to dst
+func copyResponseHeaders(dst, src http.Header) {
+	for key, values := range src {
+		for _, value := range values {
+			dst.Add(key, value)
+		}
+	}
 }
 
 // generateRequestID generates a simple request ID

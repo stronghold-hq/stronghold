@@ -1,6 +1,12 @@
 name: Deploy to Fly.io
 
 on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual deploy (required for audit trail)'
+        required: true
+        type: string
   workflow_run:
     workflows: ["Tests"]
     types: [completed]
@@ -10,7 +16,8 @@ jobs:
   deploy:
     name: Deploy to Fly.io
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -19,7 +26,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Log manual deploy
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "::notice::Manual deploy triggered by ${{ github.actor }}"
+          echo "::notice::Reason: ${{ github.event.inputs.reason }}"
 
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
