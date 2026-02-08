@@ -377,6 +377,7 @@ fly auth login
 git clone https://github.com/yv-was-taken/stronghold.git && cd stronghold
 fly launch --name stronghold-api --region iad
 fly secrets set X402_WALLET_ADDRESS=0xYOUR_WALLET_ADDRESS
+fly secrets set X402_NETWORK=base
 fly deploy
 ```
 
@@ -396,7 +397,7 @@ docker-compose --profile with-proxy up -d
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `X402_WALLET_ADDRESS` | Yes* | - | USDC receiving address |
-| `X402_NETWORK` | No | `base` | Network identifier: `base` or `base-sepolia` |
+| `X402_NETWORK` | No | `base` (set explicitly in deployment) | Network identifier: `base` or `base-sepolia` |
 | `CDP_API_KEY_ID` | Yes** | - | CDP API key ID for x402 facilitator |
 | `CDP_API_KEY_SECRET` | Yes** | - | CDP API key secret for x402 facilitator |
 | `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification layer |

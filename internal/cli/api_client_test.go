@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewAPIClient(t *testing.T) {
-	client := NewAPIClient("https://api.example.com")
+	client := NewAPIClient("https://api.example.com", "")
 	if client == nil {
 		t.Fatal("NewAPIClient returned nil")
 	}
@@ -33,7 +33,7 @@ func TestDoRequest_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	var result map[string]string
 	err := client.doRequest(http.MethodPost, "/test", http.StatusOK, nil, &result)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestDoRequest_StatusMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	err := client.doRequest(http.MethodGet, "/missing", http.StatusOK, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for status mismatch, got nil")
@@ -70,7 +70,7 @@ func TestDoRequest_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	err := client.doRequest(http.MethodPost, "/test", http.StatusOK, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for API error response, got nil")
@@ -87,7 +87,7 @@ func TestDoRequest_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	var result map[string]string
 	err := client.doRequest(http.MethodGet, "/test", http.StatusOK, nil, &result)
 	if err == nil {
@@ -112,7 +112,7 @@ func TestDoRequest_WithRequestBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	reqBody := map[string]string{"key": "value"}
 	var result map[string]string
 	err := client.doRequest(http.MethodPost, "/test", http.StatusOK, reqBody, &result)
@@ -127,7 +127,7 @@ func TestDoRequest_NilResponseBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	// Passing nil for respBody should not cause issues
 	err := client.doRequest(http.MethodDelete, "/test", http.StatusNoContent, nil, nil)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestCreateAccount(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	resp, err := client.CreateAccount(&CreateAccountRequest{})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)
@@ -179,7 +179,7 @@ func TestLogin(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	resp, err := client.Login("1234-5678-9012-3456")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
@@ -206,7 +206,7 @@ func TestUpdateWallet(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAPIClient(server.URL)
+	client := NewAPIClient(server.URL, "")
 	err := client.UpdateWallet("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 	if err != nil {
 		t.Fatalf("UpdateWallet failed: %v", err)
@@ -215,7 +215,7 @@ func TestUpdateWallet(t *testing.T) {
 
 func TestDoRequest_NetworkError(t *testing.T) {
 	// Use an invalid URL to trigger network error
-	client := NewAPIClient("http://localhost:1")
+	client := NewAPIClient("http://localhost:1", "")
 	err := client.doRequest(http.MethodGet, "/test", http.StatusOK, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for network failure, got nil")

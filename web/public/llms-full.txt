@@ -305,7 +305,7 @@ The proxy respects these environment variables:
 
 ## 4. Direct API Reference
 
-Base URL: https://api.stronghold.security
+Base URL: https://api.getstronghold.xyz
 
 ### Public Endpoints (No Payment Required)
 
@@ -314,7 +314,7 @@ Base URL: https://api.stronghold.security
 Health check endpoint.
 
 ```bash
-curl https://api.stronghold.security/health
+curl https://api.getstronghold.xyz/health
 ```
 
 Response:
@@ -335,7 +335,7 @@ Kubernetes readiness probe.
 List endpoint pricing.
 
 ```bash
-curl https://api.stronghold.security/v1/pricing
+curl https://api.getstronghold.xyz/v1/pricing
 ```
 
 Response:
@@ -365,7 +365,7 @@ Use this to check agent responses before sending to users. Catches:
 **Request:**
 
 ```bash
-curl -X POST https://api.stronghold.security/v1/scan/output \
+curl -X POST https://api.getstronghold.xyz/v1/scan/output \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: <x402-payment-header>" \
   -d '{
@@ -406,7 +406,7 @@ limitations:
 **Request:**
 
 ```bash
-curl -X POST https://api.stronghold.security/v1/scan/content \
+curl -X POST https://api.getstronghold.xyz/v1/scan/content \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: <x402-payment-header>" \
   -d '{
@@ -502,7 +502,7 @@ const fetchWithPayment = x402Client({
 
 // Scan content for prompt injection
 const result = await fetchWithPayment(
-  "https://api.stronghold.security/v1/scan/content",
+  "https://api.getstronghold.xyz/v1/scan/content",
   {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -541,7 +541,7 @@ sudo stronghold init
 
 The installer creates a local wallet and registers it with the backend.
 Private keys are stored in your OS keyring (macOS Keychain, Linux Secret
-Service/KWallet/pass).
+Service/KWallet/pass). Server-side wallet storage is optional.
 
 ### Checking Balance
 
@@ -570,11 +570,20 @@ Options:
 
 The proxy shows warnings when balance drops below 1 USDC.
 
+### TOTP and Server Wallet Storage
+
+- Server-side wallet storage is **optional** and exists only to make new device setup easier.
+- If you **upload a wallet to the server**, **TOTP is required**.
+- New devices require TOTP to trust the device before wallet retrieval.
+- TOTP setup generates **recovery codes**. Save them; they are shown once.
+- Device trust is per device: **30 days**, **90 days**, or **indefinite** (default).
+- Trusted devices can be revoked from the dashboard or CLI.
+
 ### Security Notes
 
-- Private keys never leave your device
+- Private keys stay local unless you explicitly upload to server storage
+- Server-stored keys and TOTP secrets are encrypted with KMS
 - Credentials stored in OS-native keyring
-- Only your account ID is shared with the backend
 - Payments are signed locally, verified by facilitator
 
 ---
@@ -588,7 +597,7 @@ The proxy shows warnings when balance drops below 1 USDC.
 | PORT                        | No       | 8080         | HTTP server port               |
 | X402_WALLET_ADDRESS         | Yes*     | -            | USDC receiving address         |
 | X402_FACILITATOR_URL        | No       | x402.org     | Payment facilitator            |
-| X402_NETWORK                | No       | base         | base or base-sepolia           |
+| X402_NETWORK                | No       | base (set explicitly in deploy) | base or base-sepolia         |
 | STRONGHOLD_BLOCK_THRESHOLD  | No       | 0.55         | Score threshold for BLOCK      |
 | STRONGHOLD_WARN_THRESHOLD   | No       | 0.35         | Score threshold for WARN       |
 | STRONGHOLD_ENABLE_HUGOT     | No       | true         | Enable ML classification       |
@@ -672,6 +681,6 @@ docker-compose --profile with-proxy up -d
 ## Links
 
 - GitHub: https://github.com/yv-was-taken/stronghold
-- API Docs: https://api.stronghold.security/docs
+- API Docs: https://api.getstronghold.xyz/docs
 - Dashboard: https://stronghold.security/dashboard
 - Quick Reference: https://stronghold.security/llms.txt

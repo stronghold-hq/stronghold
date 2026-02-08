@@ -15,20 +15,19 @@ func TestWorker_ExponentialBackoff(t *testing.T) {
 	w := &Worker{}
 
 	// Backoff formula: base * 2^attempts + jitter (0 to 50% of delay)
-	// So max is 1.5x the base delay
+	// So max is 1.5x the base delay, capped at 30s
 	testCases := []struct {
 		attempts     int
 		expectedMin  time.Duration
 		expectedMax  time.Duration // Base + 50% jitter
 	}{
-		{0, 5 * time.Second, 5*time.Second + 5*time.Second/2},        // 5s base + up to 2.5s jitter
-		{1, 10 * time.Second, 10*time.Second + 10*time.Second/2},     // 10s base + up to 5s jitter
-		{2, 20 * time.Second, 20*time.Second + 20*time.Second/2},     // 20s base + up to 10s jitter
-		{3, 40 * time.Second, 40*time.Second + 40*time.Second/2},     // 40s base + up to 20s jitter
-		{4, 80 * time.Second, 80*time.Second + 80*time.Second/2},     // 80s base + up to 40s jitter
-		{5, 160 * time.Second, 160*time.Second + 160*time.Second/2},  // 160s base + up to 80s jitter
-		{6, 5 * time.Minute, 5*time.Minute + 5*time.Minute/2},        // Capped at 5 minutes + up to 2.5 min jitter
-		{10, 5 * time.Minute, 5*time.Minute + 5*time.Minute/2},       // Still capped
+		{0, 2 * time.Second, 2*time.Second + 2*time.Second/2},        // 2s base + up to 1s jitter
+		{1, 4 * time.Second, 4*time.Second + 4*time.Second/2},        // 4s base + up to 2s jitter
+		{2, 8 * time.Second, 8*time.Second + 8*time.Second/2},        // 8s base + up to 4s jitter
+		{3, 16 * time.Second, 16*time.Second + 16*time.Second/2},     // 16s base + up to 8s jitter
+		{4, 30 * time.Second, 30*time.Second + 30*time.Second/2},     // Capped at 30s + up to 15s jitter
+		{5, 30 * time.Second, 30*time.Second + 30*time.Second/2},     // Still capped
+		{10, 30 * time.Second, 30*time.Second + 30*time.Second/2},    // Still capped
 	}
 
 	for _, tc := range testCases {
@@ -43,7 +42,7 @@ func TestWorker_ExponentialBackoff(t *testing.T) {
 func TestDefaultWorkerConfig(t *testing.T) {
 	cfg := DefaultWorkerConfig()
 
-	assert.Equal(t, 30*time.Second, cfg.RetryInterval)
+	assert.Equal(t, 10*time.Second, cfg.RetryInterval)
 	assert.Equal(t, 5, cfg.MaxRetryAttempts)
 	assert.Equal(t, 100, cfg.BatchSize)
 	assert.Equal(t, 1*time.Minute, cfg.ExpirationCheckInterval)
@@ -60,7 +59,7 @@ func TestNewWorker(t *testing.T) {
 		worker := NewWorker(nil, x402cfg, nil)
 		assert.NotNil(t, worker)
 		assert.NotNil(t, worker.config)
-		assert.Equal(t, 30*time.Second, worker.config.RetryInterval)
+		assert.Equal(t, 10*time.Second, worker.config.RetryInterval)
 	})
 
 	t.Run("with custom config", func(t *testing.T) {
@@ -181,15 +180,15 @@ func TestWorker_BackoffTiming(t *testing.T) {
 	w := &Worker{}
 
 	// Test that backoff generally increases with attempts (accounting for jitter)
-	// Base delays: 5s, 10s, 20s, 40s, 80s, 160s, 300s (cap)
+	// Base delays: 2s, 4s, 8s, 16s, 30s (cap)
 	baseDelays := []time.Duration{
-		5 * time.Second,
-		10 * time.Second,
-		20 * time.Second,
-		40 * time.Second,
-		80 * time.Second,
-		160 * time.Second,
-		5 * time.Minute, // cap
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		30 * time.Second, // cap
+		30 * time.Second,
+		30 * time.Second,
 	}
 
 	for i := 0; i < len(baseDelays); i++ {

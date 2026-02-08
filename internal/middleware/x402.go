@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"net/http"
 	"strings"
@@ -262,6 +263,58 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 	}
 }
 
+// RequirePaymentAndSettle verifies payment, executes the handler, then settles payment.
+// This is used when database-backed atomic payments are not available.
+func (m *X402Middleware) RequirePaymentAndSettle(price float64) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		// Skip if wallet address not configured (allow all in dev mode)
+		if m.config.WalletAddress == "" {
+			return c.Next()
+		}
+
+		// Convert price to wei (6 decimal places for USDC)
+		priceWei := decimalToWei(price)
+
+		// Check for payment header
+		paymentHeader := c.Get("X-Payment")
+		if paymentHeader == "" {
+			return m.requirePaymentResponse(c, priceWei)
+		}
+
+		// Verify payment
+		valid, err := m.verifyPayment(paymentHeader, priceWei)
+		if err != nil || !valid {
+			return m.requirePaymentResponse(c, priceWei)
+		}
+
+		// Execute the handler
+		if err := c.Next(); err != nil {
+			return err
+		}
+
+		// If handler returned an error status, do not settle
+		if c.Response().StatusCode() >= 400 {
+			return nil
+		}
+
+		// Settle payment (blocking)
+		paymentID, err := m.settlePayment(paymentHeader)
+		if err != nil {
+			slog.Error("failed to settle payment (non-atomic)", "error", err)
+			// Return 503 - payment not settled, service result not returned
+			c.Response().ResetBody()
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error":   "Payment settlement failed",
+				"retry":   true,
+				"message": "Please retry with the same payment. Your payment was not charged.",
+			})
+		}
+
+		m.PaymentResponse(c, paymentID)
+		return nil
+	}
+}
+
 // GetPaymentTransaction retrieves the payment transaction from the request context
 func GetPaymentTransaction(c fiber.Ctx) *db.PaymentTransaction {
 	if tx, ok := c.Locals("payment_tx").(*db.PaymentTransaction); ok {
@@ -506,7 +559,7 @@ func (m *X402Middleware) PaymentResponse(c fiber.Ctx, paymentID string) {
 // For example: $0.001 -> 1000 units, $1.00 -> 1000000 units
 func decimalToWei(amount float64) *big.Int {
 	// USDC has 6 decimals, so multiply by 10^6
-	units := int64(amount * 1e6)
+	units := int64(math.Round(amount * 1e6))
 	return big.NewInt(units)
 }
 
@@ -575,4 +628,3 @@ func (m *X402Middleware) getPriceForRoute(path, method string) float64 {
 	}
 	return 0
 }
-

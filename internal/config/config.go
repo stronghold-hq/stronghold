@@ -165,7 +165,7 @@ func Load() *Config {
 		X402: X402Config{
 			WalletAddress:   getEnv("X402_WALLET_ADDRESS", ""),
 			FacilitatorURL:  getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
-			Network:         getEnv("X402_NETWORK", "base-sepolia"),
+			Network:         getEnv("X402_NETWORK", "base"),
 			CDPAPIKeyID:     getEnv("CDP_API_KEY_ID", ""),
 			CDPAPIKeySecret: getEnv("CDP_API_KEY_SECRET", ""),
 		},

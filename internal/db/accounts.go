@@ -24,15 +24,17 @@ const (
 
 // Account represents a Stronghold account
 type Account struct {
-	ID             uuid.UUID      `json:"id"`
-	AccountNumber  string         `json:"account_number"`
-	WalletAddress  *string        `json:"wallet_address,omitempty"`
-	BalanceUSDC    float64        `json:"balance_usdc"`
-	Status         AccountStatus  `json:"status"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	LastLoginAt    *time.Time     `json:"last_login_at,omitempty"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
+	ID            uuid.UUID      `json:"id"`
+	AccountNumber string         `json:"account_number"`
+	WalletAddress *string        `json:"wallet_address,omitempty"`
+	BalanceUSDC   float64        `json:"balance_usdc"`
+	Status        AccountStatus  `json:"status"`
+	WalletEscrow  bool           `json:"wallet_escrow_enabled"`
+	TOTPEnabled   bool           `json:"totp_enabled"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	LastLoginAt   *time.Time     `json:"last_login_at,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 	// Encrypted wallet key fields - never exposed via JSON
 	EncryptedPrivateKey *string    `json:"-"`
 	KMSKeyID            *string    `json:"-"`
@@ -117,12 +119,15 @@ func (db *DB) GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error
 	account := &Account{}
 	err := db.QueryRow(ctx, `
 		SELECT id, account_number, wallet_address, balance_usdc, status,
+		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
 		WHERE id = $1
 	`, id).Scan(
 		&account.ID, &account.AccountNumber, &account.WalletAddress,
-		&account.BalanceUSDC, &account.Status, &account.CreatedAt,
+		&account.BalanceUSDC, &account.Status,
+		&account.WalletEscrow, &account.TOTPEnabled,
+		&account.CreatedAt,
 		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
 	)
 
@@ -144,12 +149,15 @@ func (db *DB) GetAccountByNumber(ctx context.Context, accountNumber string) (*Ac
 	account := &Account{}
 	err := db.QueryRow(ctx, `
 		SELECT id, account_number, wallet_address, balance_usdc, status,
+		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
 		WHERE account_number = $1
 	`, normalized).Scan(
 		&account.ID, &account.AccountNumber, &account.WalletAddress,
-		&account.BalanceUSDC, &account.Status, &account.CreatedAt,
+		&account.BalanceUSDC, &account.Status,
+		&account.WalletEscrow, &account.TOTPEnabled,
+		&account.CreatedAt,
 		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
 	)
 
@@ -168,12 +176,15 @@ func (db *DB) GetAccountByWalletAddress(ctx context.Context, walletAddress strin
 	account := &Account{}
 	err := db.QueryRow(ctx, `
 		SELECT id, account_number, wallet_address, balance_usdc, status,
+		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
 		WHERE wallet_address = $1
 	`, walletAddress).Scan(
 		&account.ID, &account.AccountNumber, &account.WalletAddress,
-		&account.BalanceUSDC, &account.Status, &account.CreatedAt,
+		&account.BalanceUSDC, &account.Status,
+		&account.WalletEscrow, &account.TOTPEnabled,
+		&account.CreatedAt,
 		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
 	)
 
@@ -394,5 +405,64 @@ func (db *DB) UpdateWalletAddress(ctx context.Context, accountID uuid.UUID, wall
 		return fmt.Errorf("failed to update wallet address: %w", err)
 	}
 
+	return nil
+}
+
+// SetTOTPSecret stores the encrypted TOTP secret for an account.
+func (db *DB) SetTOTPSecret(ctx context.Context, accountID uuid.UUID, encryptedSecret string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts
+		SET totp_secret_encrypted = $1, updated_at = $2
+		WHERE id = $3
+	`, encryptedSecret, time.Now().UTC(), accountID)
+	if err != nil {
+		return fmt.Errorf("failed to store TOTP secret: %w", err)
+	}
+	return nil
+}
+
+// GetTOTPSecret retrieves the encrypted TOTP secret for an account.
+func (db *DB) GetTOTPSecret(ctx context.Context, accountID uuid.UUID) (string, error) {
+	var encrypted *string
+	err := db.QueryRow(ctx, `
+		SELECT totp_secret_encrypted
+		FROM accounts
+		WHERE id = $1
+	`, accountID).Scan(&encrypted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errors.New("account not found")
+		}
+		return "", fmt.Errorf("failed to get TOTP secret: %w", err)
+	}
+	if encrypted == nil || *encrypted == "" {
+		return "", errors.New("TOTP not configured")
+	}
+	return *encrypted, nil
+}
+
+// SetTOTPEnabled updates whether TOTP is enabled for an account.
+func (db *DB) SetTOTPEnabled(ctx context.Context, accountID uuid.UUID, enabled bool) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts
+		SET totp_enabled = $1, updated_at = $2
+		WHERE id = $3
+	`, enabled, time.Now().UTC(), accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update TOTP status: %w", err)
+	}
+	return nil
+}
+
+// SetWalletEscrowEnabled updates whether server-side wallet storage is enabled for an account.
+func (db *DB) SetWalletEscrowEnabled(ctx context.Context, accountID uuid.UUID, enabled bool) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts
+		SET wallet_escrow_enabled = $1, updated_at = $2
+		WHERE id = $3
+	`, enabled, time.Now().UTC(), accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update wallet escrow status: %w", err)
+	}
 	return nil
 }

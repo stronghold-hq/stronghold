@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -79,13 +81,67 @@ func WalletReplace(fileFlag string, yesFlag bool) error {
 		return fmt.Errorf("failed to import wallet: %w", err)
 	}
 
-	// Update wallet on server if logged in
-	apiClient := NewAPIClient(config.API.Endpoint)
-	if err := apiClient.UpdateWallet(cleanedKey); err != nil {
-		fmt.Printf("%s Could not update wallet on server: %v\n", warningStyle.Render("WARNING:"), err)
-		fmt.Println("Wallet updated locally only. Server sync may be needed later.")
-	} else {
+	uploadToServer := false
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		uploadToServer = Confirm("Upload wallet to server for multi-device setup? [y/N]")
+	}
+
+	if uploadToServer {
+		if config.Auth.AccountNumber == "" {
+			return fmt.Errorf("account number missing. Run 'stronghold init' first")
+		}
+
+		apiClient := NewAPIClient(config.API.Endpoint, config.Auth.DeviceToken)
+		if _, err := apiClient.Login(config.Auth.AccountNumber); err != nil {
+			return fmt.Errorf("login failed: %w", err)
+		}
+
+		if setup, err := apiClient.SetupTOTP(); err == nil {
+			printTOTPSetup(setup)
+		} else {
+			var apiErr *APIError
+			if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
+				fmt.Println(warningStyle.Render("TOTP already enabled. Enter your existing TOTP or recovery code."))
+			} else {
+				fmt.Printf("%s TOTP setup: %v\n", warningStyle.Render("WARNING:"), err)
+			}
+		}
+
+		fmt.Println(warningStyle.Render("WARNING:"))
+		fmt.Println("Uploading your private key enables multi-device setup.")
+		fmt.Println("If you lose your old key, funds are not recoverable. Back up your key now.")
+
+		code, isRecovery, err := promptTOTPCode()
+		if err != nil {
+			return fmt.Errorf("failed to read TOTP: %w", err)
+		}
+		ttlDays := promptDeviceTTL()
+		verifyReq := &TOTPVerifyRequest{
+			DeviceLabel:   defaultDeviceLabel(),
+			DeviceTTLDays: ttlDays,
+		}
+		if isRecovery {
+			verifyReq.RecoveryCode = code
+		} else {
+			verifyReq.Code = code
+		}
+
+		verifyResp, err := apiClient.VerifyTOTP(verifyReq)
+		if err != nil {
+			return fmt.Errorf("TOTP verification failed: %w", err)
+		}
+
+		config.Auth.DeviceToken = verifyResp.DeviceToken
+		apiClient.SetDeviceToken(verifyResp.DeviceToken)
+
+		if err := apiClient.UpdateWallet(cleanedKey); err != nil {
+			return fmt.Errorf("failed to upload wallet to server: %w", err)
+		}
 		fmt.Println(successStyle.Render("✓ Wallet updated on server"))
+	} else {
+		fmt.Println(warningStyle.Render("WARNING:"))
+		fmt.Println("Wallet updated locally only. Server sync was skipped.")
+		fmt.Println("To upload later, rerun 'stronghold wallet replace' and choose upload when prompted.")
 	}
 
 	// Update config

@@ -16,7 +16,7 @@ api.stronghold.security {
     header @cors_origins {
         Access-Control-Allow-Origin {http.request.header.Origin}
         Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-        Access-Control-Allow-Headers "Origin, Content-Type, Accept, X-PAYMENT, X-PAYMENT-RESPONSE, Authorization"
+        Access-Control-Allow-Headers "Origin, Content-Type, Accept, X-PAYMENT, X-PAYMENT-RESPONSE, Authorization, X-Stronghold-Device"
         Access-Control-Expose-Headers "X-PAYMENT-RESPONSE"
         Access-Control-Max-Age 300
         Vary Origin

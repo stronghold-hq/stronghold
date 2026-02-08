@@ -65,9 +65,9 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 		// Output scanning - detect credential leaks in LLM responses
 		group.Post("/output", h.x402.AtomicPayment(h.pricing.ScanOutput), h.ScanOutput)
 	} else {
-		// Fallback to non-atomic payment (original behavior)
-		group.Post("/content", h.x402.RequirePayment(h.pricing.ScanContent), h.ScanContent)
-		group.Post("/output", h.x402.RequirePayment(h.pricing.ScanOutput), h.ScanOutput)
+		// Fallback to non-atomic payment with settlement
+		group.Post("/content", h.x402.RequirePaymentAndSettle(h.pricing.ScanContent), h.ScanContent)
+		group.Post("/output", h.x402.RequirePaymentAndSettle(h.pricing.ScanOutput), h.ScanOutput)
 	}
 }
 
@@ -131,8 +131,6 @@ func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
 	// Record execution result in payment transaction for idempotent replay
 	h.recordExecutionResult(c, result)
 
-	h.x402.PaymentResponse(c, result.RequestID)
-
 	return c.JSON(result)
 }
 
@@ -186,8 +184,6 @@ func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
 
 	// Record execution result in payment transaction for idempotent replay
 	h.recordExecutionResult(c, result)
-
-	h.x402.PaymentResponse(c, result.RequestID)
 
 	return c.JSON(result)
 }

@@ -17,8 +17,11 @@ interface AuthContextType {
   account: Account | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (accountNumber: string) => Promise<void>;
-  createAccount: () => Promise<{ accountNumber: string; recoveryFile: string; walletAddress: string }>;
+  totpRequired: boolean;
+  login: (accountNumber: string) => Promise<{ totpRequired: boolean }>;
+  createAccount: () => Promise<{ accountNumber: string; recoveryFile: string; walletAddress?: string }>;
+  verifyTotp: (code: string, isRecovery: boolean, ttlDays: number) => Promise<void>;
+  resetTotp: () => void;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<boolean>;
 }
@@ -28,6 +31,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [account, setAccount] = useState<Account | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [totpRequired, setTotpRequired] = useState(false);
 
   const refreshAuth = useCallback(async (): Promise<boolean> => {
     try {
@@ -52,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (response.ok) {
         const data = await response.json();
         setAccount(data);
+        setTotpRequired(false);
       } else if (response.status === 401) {
         // Try to refresh the token
         const refreshed = await refreshAuth();
@@ -63,7 +68,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (retryResponse.ok) {
             const data = await retryResponse.json();
             setAccount(data);
+            setTotpRequired(false);
           }
+        }
+      } else if (response.status === 403) {
+        const data = await response.json().catch(() => null);
+        if (data?.totp_required) {
+          setTotpRequired(true);
         }
       }
     } catch (error) {
@@ -78,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  const login = async (accountNumber: string) => {
+  const login = async (accountNumber: string): Promise<{ totpRequired: boolean }> => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/v1/auth/login`, {
@@ -95,14 +106,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(error.error || 'Login failed');
       }
 
+      const data = await response.json();
+      if (data?.totp_required) {
+        setTotpRequired(true);
+        return { totpRequired: true };
+      }
+
       // Fetch account info after successful login
+      await checkAuth();
+      return { totpRequired: false };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyTotp = async (code: string, isRecovery: boolean, ttlDays: number) => {
+    setIsLoading(true);
+    try {
+      const label =
+        typeof navigator !== 'undefined'
+          ? `${detectBrowser()} on ${detectPlatform()}`
+          : 'web';
+
+      const body = isRecovery
+        ? { recovery_code: code, device_label: label, device_ttl_days: ttlDays }
+        : { code, device_label: label, device_ttl_days: ttlDays };
+
+      const response = await fetch(`${API_URL}/v1/auth/totp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'TOTP verification failed');
+      }
+
+      setTotpRequired(false);
       await checkAuth();
     } finally {
       setIsLoading(false);
     }
   };
 
-  const createAccount = async (): Promise<{ accountNumber: string; recoveryFile: string; walletAddress: string }> => {
+  const createAccount = async (): Promise<{ accountNumber: string; recoveryFile: string; walletAddress?: string }> => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/v1/auth/account`, {
@@ -124,11 +173,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Fetch account info after successful creation
       await checkAuth();
 
-      return {
+      const result: { accountNumber: string; recoveryFile: string; walletAddress?: string } = {
         accountNumber: data.account_number,
         recoveryFile: data.recovery_file,
-        walletAddress: data.wallet_address,
       };
+      if (data.wallet_address) {
+        result.walletAddress = data.wallet_address;
+      }
+      return result;
     } finally {
       setIsLoading(false);
     }
@@ -145,6 +197,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     setAccount(null);
+    setTotpRequired(false);
+  };
+
+  const resetTotp = () => {
+    setTotpRequired(false);
   };
 
   return (
@@ -153,8 +210,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         account,
         isLoading,
         isAuthenticated: !!account,
+        totpRequired,
         login,
         createAccount,
+        verifyTotp,
+        resetTotp,
         logout,
         refreshAuth,
       }}
@@ -170,4 +230,27 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+function detectBrowser(): string {
+  if (typeof navigator === 'undefined') {
+    return 'Browser';
+  }
+  const ua = navigator.userAgent;
+  if (ua.includes('Edg/')) return 'Edge';
+  if (ua.includes('Chrome/')) return 'Chrome';
+  if (ua.includes('Firefox/')) return 'Firefox';
+  if (ua.includes('Safari/') && !ua.includes('Chrome/')) return 'Safari';
+  return 'Browser';
+}
+
+function detectPlatform(): string {
+  if (typeof navigator === 'undefined') {
+    return 'unknown';
+  }
+  const navAny = navigator as Navigator & { userAgentData?: { platform?: string } };
+  if (navAny.userAgentData?.platform) {
+    return navAny.userAgentData.platform;
+  }
+  return navigator.platform || 'unknown';
 }

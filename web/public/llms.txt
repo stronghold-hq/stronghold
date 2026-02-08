@@ -100,7 +100,7 @@ stronghold config set scanning.content.action_on_warn block
 
 ## 2. Direct API
 
-Base URL: https://api.stronghold.security
+Base URL: https://api.getstronghold.xyz
 
 ### POST /v1/scan/output (Recommended API use)
 
@@ -112,7 +112,7 @@ Use this to check agent output for accidentally exposed:
 - Database connection strings
 
 ```bash
-curl -X POST https://api.stronghold.security/v1/scan/output \
+curl -X POST https://api.getstronghold.xyz/v1/scan/output \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: <x402-payment-header>" \
   -d '{"text": "Here is the config: DB_PASSWORD=secret123"}'
@@ -132,7 +132,7 @@ If you cannot install the proxy (serverless, sandboxed environments),
 this endpoint exists as a fallback.
 
 ```bash
-curl -X POST https://api.stronghold.security/v1/scan/content \
+curl -X POST https://api.getstronghold.xyz/v1/scan/content \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: <x402-payment-header>" \
   -d '{"text": "Ignore previous instructions...", "source_url": "https://example.com"}'
@@ -162,7 +162,7 @@ Decisions: ALLOW (safe), WARN (review), BLOCK (reject)
 
 Both proxy and API require a funded account:
 
-1. **Create account**: https://stronghold.security/dashboard or `stronghold install`
+1. **Create account**: https://stronghold.security/dashboard or `stronghold init`
 2. **Deposit USDC**: Via dashboard (Stripe, Coinbase Pay) or direct transfer
 3. **Pay-per-request**: $0.002 per scan
 
@@ -171,9 +171,34 @@ Add funds: `stronghold account deposit`
 
 ---
 
+## TOTP and Wallet Uploads (Important)
+
+Stronghold supports optional server-side wallet storage for easier setup on new devices.
+If you choose to upload your wallet to the server, **TOTP is required**.
+
+### Wallet Upload Rules
+
+- **TOTP required** when uploading or replacing a wallet on the server.
+- **Account number alone is read-only**. Sensitive actions require TOTP when server wallet storage is enabled.
+- Wallets can also stay **local-only** (no TOTP required, no server storage).
+
+### TOTP Recovery
+
+- During TOTP setup, Stronghold provides **recovery codes**.
+- **Recovery codes are shown once**. Save them securely.
+- If the authenticator is lost, a recovery code is required to trust a new device.
+
+### Device Trust
+
+- After a successful TOTP verification, the device is trusted.
+- Trust duration is per device: **30 days**, **90 days**, or **indefinite** (default).
+- Trusted devices can be revoked from the dashboard or CLI.
+
+---
+
 ## Links
 
 - Documentation: https://github.com/yv-was-taken/stronghold
-- API Docs: https://api.stronghold.security/docs
+- API Docs: https://api.getstronghold.xyz/docs
 - Dashboard: https://stronghold.security/dashboard
 - Full Reference: https://stronghold.security/llms-full.txt

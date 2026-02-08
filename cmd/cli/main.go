@@ -281,6 +281,10 @@ Reads the private key from (in order of precedence):
   3. --file flag
   4. Interactive prompt (if terminal)
 
+If you run this interactively, you'll be asked whether to upload the private key
+to the server for multi-device setup (requires TOTP). Selecting "no" keeps your
+wallet local-only.
+
 Example:
   echo $KEY | stronghold wallet replace --yes
   STRONGHOLD_PRIVATE_KEY=xxx stronghold wallet replace --yes

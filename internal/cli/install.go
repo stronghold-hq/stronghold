@@ -34,33 +34,33 @@ const (
 
 // InstallModel is the Bubble Tea model for the install command
 type InstallModel struct {
-	state       InstallState
-	config      *CLIConfig
-	width       int
-	height      int
+	state  InstallState
+	config *CLIConfig
+	width  int
+	height int
 
 	// Warning step
 	confirmWarning bool
 
 	// Account step
-	accountChoice   int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
-	accountNumber   string
-	walletAddress   string
-	authToken       string
-	loggedIn        bool
-	importKeyInput  textinput.Model
-	loginInput      textinput.Model
-	awaitingKeyInput bool
+	accountChoice      int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
+	accountNumber      string
+	walletAddress      string
+	authToken          string
+	loggedIn           bool
+	importKeyInput     textinput.Model
+	loginInput         textinput.Model
+	awaitingKeyInput   bool
 	awaitingLoginInput bool
 
 	// Payment step
 	paymentMethod int // 0 = stripe, 1 = wallet
 
 	// Config step
-	portInput   textinput.Model
-	apiInput    textinput.Model
-	configPort  int
-	configAPI   string
+	portInput  textinput.Model
+	apiInput   textinput.Model
+	configPort int
+	configAPI  string
 
 	// Progress
 	progress    []string
@@ -71,34 +71,34 @@ type InstallModel struct {
 // Styles - exported styles have capitalized names
 var (
 	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#00D4AA")).
-		MarginBottom(1)
+			Bold(true).
+			Foreground(lipgloss.Color("#00D4AA")).
+			MarginBottom(1)
 
 	headerStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF"))
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF"))
 
 	successStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00D4AA"))
+			Foreground(lipgloss.Color("#00D4AA"))
 
 	// WarningStyle is exported for use in main.go
 	WarningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFA500"))
+			Foreground(lipgloss.Color("#FFA500"))
 	warningStyle = WarningStyle // internal alias
 
 	errorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF4444"))
+			Foreground(lipgloss.Color("#FF4444"))
 
 	infoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888"))
+			Foreground(lipgloss.Color("#888888"))
 
 	selectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00D4AA")).
-		Bold(true)
+			Foreground(lipgloss.Color("#00D4AA")).
+			Bold(true)
 
 	unselectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888"))
+			Foreground(lipgloss.Color("#888888"))
 )
 
 // NewInstallModel creates a new install model
@@ -271,7 +271,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Wallet imported: %s", address)))
 
 			// Create account via API with this wallet
-			apiClient := NewAPIClient(m.config.API.Endpoint)
+			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
 			resp, err := apiClient.CreateAccount(&CreateAccountRequest{WalletAddress: &address})
 			if err != nil {
 				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ API unavailable: %v", err)))
@@ -294,7 +294,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			if accountNum == "" {
 				return m, nil
 			}
-			apiClient := NewAPIClient(m.config.API.Endpoint)
+			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
 			loginResp, err := apiClient.Login(accountNum)
 			if err != nil {
 				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Login failed: %v", err)))
@@ -308,28 +308,40 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.loggedIn = true
 			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Logged in as %s", loginResp.AccountNumber)))
 
-			// Fetch and import wallet key from separate endpoint
+			if err := ensureTrustedDevice(apiClient, m.config, loginResp.TOTPRequired); err != nil {
+				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ TOTP verification failed: %v", err)))
+				m.awaitingLoginInput = false
+				return m, nil
+			}
+
 			if loginResp.WalletAddress != nil {
-				privateKey, err := apiClient.GetWalletKey()
-				if err != nil {
-					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet key fetch failed: %v", err)))
+				if loginResp.EscrowEnabled {
+					privateKey, err := apiClient.GetWalletKey()
+					if err != nil {
+						m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet key fetch failed: %v", err)))
+						m.config.Wallet.Address = *loginResp.WalletAddress
+						m.config.Wallet.Network = DefaultBlockchain
+						m.walletAddress = *loginResp.WalletAddress
+					} else {
+						userID := generateUserID()
+						m.config.Auth.UserID = userID
+						address, err := ImportWallet(userID, DefaultBlockchain, privateKey)
+						// Zero the private key after use
+						ZeroString(&privateKey)
+						if err != nil {
+							m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet import failed: %v", err)))
+						} else {
+							m.config.Wallet.Address = address
+							m.config.Wallet.Network = DefaultBlockchain
+							m.walletAddress = address
+							m.progress = append(m.progress, successStyle.Render("✓ Wallet synced"))
+						}
+					}
+				} else {
 					m.config.Wallet.Address = *loginResp.WalletAddress
 					m.config.Wallet.Network = DefaultBlockchain
 					m.walletAddress = *loginResp.WalletAddress
-				} else {
-					userID := generateUserID()
-					m.config.Auth.UserID = userID
-					address, err := ImportWallet(userID, DefaultBlockchain, privateKey)
-					// Zero the private key after use
-					ZeroString(&privateKey)
-					if err != nil {
-						m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet import failed: %v", err)))
-					} else {
-						m.config.Wallet.Address = address
-						m.config.Wallet.Network = DefaultBlockchain
-						m.walletAddress = address
-						m.progress = append(m.progress, successStyle.Render("✓ Wallet synced"))
-					}
+					m.progress = append(m.progress, warningStyle.Render("⚠ Wallet not stored on server. Import locally to enable payments."))
 				}
 			}
 			m.awaitingLoginInput = false
@@ -338,27 +350,36 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 		}
 
 		if m.accountChoice == AccountChoiceCreate { // Create new account
-			// Try to create account via API
-			apiClient := NewAPIClient(m.config.API.Endpoint)
-			resp, err := apiClient.CreateAccount(&CreateAccountRequest{})
+			// Create a local wallet first, then register its address with the API.
+			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
+			walletAddress := m.config.Wallet.Address
+			if walletAddress == "" {
+				userID := m.config.Auth.UserID
+				if userID == "" {
+					userID = generateUserID()
+					m.config.Auth.UserID = userID
+				}
+				address, err := SetupWallet(userID, "base")
+				if err != nil {
+					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet setup failed: %v", err)))
+				} else {
+					walletAddress = address
+					m.config.Wallet.Address = address
+					m.config.Wallet.Network = DefaultBlockchain
+					m.walletAddress = address
+					m.progress = append(m.progress, successStyle.Render("✓ Wallet created locally"))
+				}
+			}
+
+			req := &CreateAccountRequest{}
+			if walletAddress != "" {
+				req.WalletAddress = &walletAddress
+			}
+
+			resp, err := apiClient.CreateAccount(req)
 			if err != nil {
 				// API failed, fall back to local wallet creation
 				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ API unavailable: %v", err)))
-
-				// Generate a unique user ID for wallet creation
-				userID := generateUserID()
-				m.config.Auth.UserID = userID
-
-				// Create wallet locally
-				walletAddress, err := SetupWallet(userID, "base")
-				if err != nil {
-					m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet setup failed: %v", err)))
-				} else {
-					m.config.Wallet.Address = walletAddress
-					m.config.Wallet.Network = DefaultBlockchain
-					m.walletAddress = walletAddress
-					m.progress = append(m.progress, successStyle.Render("✓ Wallet created locally"))
-				}
 
 				// Generate simulated account number for offline mode
 				m.accountNumber = generateSimulatedAccountNumber()
@@ -366,41 +387,14 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				m.config.Auth.LoggedIn = true
 				m.loggedIn = true
 			} else {
-				// API success - account and wallet created server-side
+				// API success - account created with local wallet address (if available)
 				m.accountNumber = resp.AccountNumber
 				m.config.Auth.AccountNumber = resp.AccountNumber
 				m.config.Auth.LoggedIn = true
 				m.loggedIn = true
 				m.progress = append(m.progress, successStyle.Render("✓ Account created via API"))
-
-				// Now login and fetch wallet key via separate endpoint
-				loginResp, err := apiClient.Login(resp.AccountNumber)
-				if err != nil {
-					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Login failed: %v", err)))
-				} else if loginResp.WalletAddress != nil {
-					// Fetch wallet key from dedicated endpoint
-					privateKey, err := apiClient.GetWalletKey()
-					if err != nil {
-						// Fallback: use wallet address without key
-						m.config.Wallet.Address = *loginResp.WalletAddress
-						m.config.Wallet.Network = DefaultBlockchain
-						m.walletAddress = *loginResp.WalletAddress
-						m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet key fetch failed: %v", err)))
-					} else {
-						userID := generateUserID()
-						m.config.Auth.UserID = userID
-						address, err := ImportWallet(userID, DefaultBlockchain, privateKey)
-						// Zero the private key after use
-						ZeroString(&privateKey)
-						if err != nil {
-							m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Wallet import failed: %v", err)))
-						} else {
-							m.config.Wallet.Address = address
-							m.config.Wallet.Network = DefaultBlockchain
-							m.walletAddress = address
-							m.progress = append(m.progress, successStyle.Render("✓ Wallet synced from server"))
-						}
-					}
+				if walletAddress == "" {
+					m.progress = append(m.progress, warningStyle.Render("⚠ Account created without a wallet. Configure a local wallet to enable payments."))
 				}
 			}
 
@@ -676,6 +670,7 @@ func (m *InstallModel) viewComplete() string {
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("  Status:    stronghold status\n"))
 	b.WriteString(fmt.Sprintf("  Wallet:    stronghold wallet show\n"))
+	b.WriteString(fmt.Sprintf("  Upload:    stronghold wallet replace  (choose upload when prompted)\n"))
 	b.WriteString(fmt.Sprintf("  Disable:   stronghold disable\n"))
 	b.WriteString(fmt.Sprintf("  Dashboard: https://dashboard.stronghold.security\n"))
 	b.WriteString(fmt.Sprintf("  Usage:     ~$0.001 per scanned request\n\n"))
@@ -854,9 +849,9 @@ func InstallCAToTrustStore(certPath string) error {
 func installCALinux(certPath string) error {
 	// Determine the correct CA directory based on distro
 	caDirs := []string{
-		"/usr/local/share/ca-certificates",           // Debian/Ubuntu
-		"/etc/pki/ca-trust/source/anchors",           // RHEL/CentOS/Fedora
-		"/etc/ca-certificates/trust-source/anchors",  // Arch Linux
+		"/usr/local/share/ca-certificates",          // Debian/Ubuntu
+		"/etc/pki/ca-trust/source/anchors",          // RHEL/CentOS/Fedora
+		"/etc/ca-certificates/trust-source/anchors", // Arch Linux
 	}
 
 	var destDir string
@@ -887,9 +882,9 @@ func installCALinux(certPath string) error {
 
 	// Update CA certificates
 	updateCommands := [][]string{
-		{"update-ca-certificates"},            // Debian/Ubuntu
-		{"update-ca-trust", "extract"},        // RHEL/CentOS/Fedora
-		{"trust", "extract-compat"},           // Arch Linux
+		{"update-ca-certificates"},     // Debian/Ubuntu
+		{"update-ca-trust", "extract"}, // RHEL/CentOS/Fedora
+		{"trust", "extract-compat"},    // Arch Linux
 	}
 
 	for _, cmd := range updateCommands {
@@ -906,8 +901,8 @@ func installCALinux(certPath string) error {
 func installCADarwin(certPath string) error {
 	// Add to system keychain as trusted root
 	cmd := exec.Command("security", "add-trusted-cert",
-		"-d",                                    // Add to admin cert store
-		"-r", "trustRoot",                       // Trust as root CA
+		"-d",              // Add to admin cert store
+		"-r", "trustRoot", // Trust as root CA
 		"-k", "/Library/Keychains/System.keychain",
 		certPath,
 	)
@@ -1023,7 +1018,7 @@ func RunInstallNonInteractive(privateKey, accountNumber string) error {
 	}
 
 	// Handle account setup
-	apiClient := NewAPIClient(config.API.Endpoint)
+	apiClient := NewAPIClient(config.API.Endpoint, config.Auth.DeviceToken)
 	userID := generateUserID()
 	config.Auth.UserID = userID
 
@@ -1034,27 +1029,35 @@ func RunInstallNonInteractive(privateKey, accountNumber string) error {
 		if err != nil {
 			return fmt.Errorf("failed to login: %w", err)
 		}
+		if loginResp.TOTPRequired {
+			return fmt.Errorf("TOTP required for new device login. Run interactively to complete verification")
+		}
 		config.Auth.AccountNumber = loginResp.AccountNumber
 		config.Auth.LoggedIn = true
 
-		// Fetch and import wallet key from separate endpoint
 		if loginResp.WalletAddress != nil {
-			walletKey, err := apiClient.GetWalletKey()
-			if err != nil {
-				// Fallback: use wallet address without key
+			if loginResp.EscrowEnabled {
+				walletKey, err := apiClient.GetWalletKey()
+				if err != nil {
+					// Fallback: use wallet address without key
+					config.Wallet.Address = *loginResp.WalletAddress
+					config.Wallet.Network = DefaultBlockchain
+					fmt.Printf("⚠ Wallet key fetch failed: %v\n", err)
+				} else {
+					address, err := ImportWallet(userID, DefaultBlockchain, walletKey)
+					// Zero the private key after use
+					ZeroString(&walletKey)
+					if err != nil {
+						return fmt.Errorf("failed to import wallet: %w", err)
+					}
+					config.Wallet.Address = address
+					config.Wallet.Network = DefaultBlockchain
+					fmt.Printf("✓ Wallet synced: %s\n", address)
+				}
+			} else {
 				config.Wallet.Address = *loginResp.WalletAddress
 				config.Wallet.Network = DefaultBlockchain
-				fmt.Printf("⚠ Wallet key fetch failed: %v\n", err)
-			} else {
-				address, err := ImportWallet(userID, DefaultBlockchain, walletKey)
-				// Zero the private key after use
-				ZeroString(&walletKey)
-				if err != nil {
-					return fmt.Errorf("failed to import wallet: %w", err)
-				}
-				config.Wallet.Address = address
-				config.Wallet.Network = DefaultBlockchain
-				fmt.Printf("✓ Wallet synced: %s\n", address)
+				fmt.Println("⚠ Wallet not stored on server. Import locally to enable payments.")
 			}
 		}
 		fmt.Printf("✓ Logged in as %s\n", loginResp.AccountNumber)
@@ -1062,6 +1065,19 @@ func RunInstallNonInteractive(privateKey, accountNumber string) error {
 		// Create new account
 		fmt.Println("→ Creating account...")
 		req := &CreateAccountRequest{}
+
+		// Create a local wallet first if no private key is provided
+		if privateKey == "" {
+			walletAddress, err := SetupWallet(userID, "base")
+			if err != nil {
+				fmt.Printf("⚠ Wallet setup failed: %v\n", err)
+			} else {
+				config.Wallet.Address = walletAddress
+				config.Wallet.Network = DefaultBlockchain
+				req.WalletAddress = &walletAddress
+				fmt.Printf("✓ Wallet created: %s\n", walletAddress)
+			}
+		}
 
 		// If private key provided, we'll set up wallet locally and pass address to API
 		if privateKey != "" {
@@ -1079,37 +1095,9 @@ func RunInstallNonInteractive(privateKey, accountNumber string) error {
 		resp, err := apiClient.CreateAccount(req)
 		if err != nil {
 			fmt.Printf("⚠ API unavailable: %v\n", err)
-			// Fallback to local wallet creation if no private key provided
-			if privateKey == "" {
-				walletAddress, err := SetupWallet(userID, "base")
-				if err != nil {
-					return fmt.Errorf("failed to create wallet: %w", err)
-				}
-				config.Wallet.Address = walletAddress
-				config.Wallet.Network = DefaultBlockchain
-				fmt.Printf("✓ Wallet created: %s\n", walletAddress)
-			}
 			config.Auth.AccountNumber = generateSimulatedAccountNumber()
 		} else {
 			config.Auth.AccountNumber = resp.AccountNumber
-
-			// If we didn't import a key, sync wallet from server
-			if privateKey == "" {
-				loginResp, err := apiClient.Login(resp.AccountNumber)
-				if err == nil && loginResp.WalletAddress != nil {
-					walletKey, err := apiClient.GetWalletKey()
-					if err == nil {
-						address, err := ImportWallet(userID, DefaultBlockchain, walletKey)
-						// Zero the private key after use
-						ZeroString(&walletKey)
-						if err == nil {
-							config.Wallet.Address = address
-							config.Wallet.Network = DefaultBlockchain
-							fmt.Printf("✓ Wallet synced: %s\n", address)
-						}
-					}
-				}
-			}
 		}
 		config.Auth.LoggedIn = true
 		fmt.Printf("✓ Account: %s\n", config.Auth.AccountNumber)

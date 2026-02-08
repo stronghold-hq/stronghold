@@ -32,6 +32,7 @@ type AuthConfig struct {
 	UserID        string `yaml:"user_id"`
 	AccountNumber string `yaml:"account_number"`
 	LoggedIn      bool   `yaml:"logged_in"`
+	DeviceToken   string `yaml:"device_token,omitempty"`
 }
 
 // WalletConfig holds wallet configuration
@@ -281,4 +282,3 @@ func IsSupportedPlatform() bool {
 		return false
 	}
 }
-

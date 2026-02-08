@@ -7,23 +7,33 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"time"
 )
 
 // APIClient handles communication with the Stronghold API
 type APIClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL     string
+	httpClient  *http.Client
+	deviceToken string
 }
 
 // NewAPIClient creates a new API client
-func NewAPIClient(baseURL string) *APIClient {
+func NewAPIClient(baseURL, deviceToken string) *APIClient {
+	jar, _ := cookiejar.New(nil)
 	return &APIClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			Jar:     jar,
 		},
+		deviceToken: deviceToken,
 	}
+}
+
+// SetDeviceToken updates the device token used for trusted device access.
+func (c *APIClient) SetDeviceToken(token string) {
+	c.deviceToken = token
 }
 
 // CreateAccountRequest represents a request to create an account
@@ -48,6 +58,9 @@ type LoginResponse struct {
 	AccountNumber string  `json:"account_number"`
 	ExpiresAt     string  `json:"expires_at"`
 	WalletAddress *string `json:"wallet_address,omitempty"`
+	TOTPRequired  bool    `json:"totp_required"`
+	DeviceTrusted bool    `json:"device_trusted"`
+	EscrowEnabled bool    `json:"wallet_escrow_enabled"`
 }
 
 // GetWalletKeyResponse represents the response from the wallet-key endpoint
@@ -58,6 +71,22 @@ type GetWalletKeyResponse struct {
 // ErrorResponse represents an API error response
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// APIError captures HTTP errors with status codes for callers that need branching.
+type APIError struct {
+	StatusCode int
+	Method     string
+	Endpoint   string
+	Message    string
+	Kind       string
+}
+
+func (e *APIError) Error() string {
+	if e.Kind == "api" {
+		return fmt.Sprintf("API error (%d %s %s): %s", e.StatusCode, e.Method, e.Endpoint, e.Message)
+	}
+	return fmt.Sprintf("unexpected status %d from %s %s: %s", e.StatusCode, e.Method, e.Endpoint, e.Message)
 }
 
 // doRequest performs an HTTP request with JSON marshaling/unmarshaling
@@ -76,6 +105,9 @@ func (c *APIClient) doRequest(method, endpoint string, expectedStatus int, reqBo
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.deviceToken != "" {
+		req.Header.Set("X-Stronghold-Device", c.deviceToken)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -91,16 +123,26 @@ func (c *APIClient) doRequest(method, endpoint string, expectedStatus int, reqBo
 	if resp.StatusCode != expectedStatus {
 		var errResp ErrorResponse
 		if json.Unmarshal(respData, &errResp) == nil && errResp.Error != "" {
-			return fmt.Errorf("API error (%d %s %s): %s",
-				resp.StatusCode, method, endpoint, errResp.Error)
+			return &APIError{
+				StatusCode: resp.StatusCode,
+				Method:     method,
+				Endpoint:   endpoint,
+				Message:    errResp.Error,
+				Kind:       "api",
+			}
 		}
 		// Include truncated response body for debugging
 		bodyPreview := string(respData)
 		if len(bodyPreview) > 200 {
 			bodyPreview = bodyPreview[:200] + "..."
 		}
-		return fmt.Errorf("unexpected status %d from %s %s: %s",
-			resp.StatusCode, method, endpoint, bodyPreview)
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Method:     method,
+			Endpoint:   endpoint,
+			Message:    bodyPreview,
+			Kind:       "status",
+		}
 	}
 
 	if respBody != nil {
@@ -137,6 +179,46 @@ func (c *APIClient) GetWalletKey() (string, error) {
 		return "", err
 	}
 	return result.PrivateKey, nil
+}
+
+// TOTPSetupResponse represents the response from TOTP setup.
+type TOTPSetupResponse struct {
+	Secret        string   `json:"secret"`
+	OTPAuthURL    string   `json:"otpauth_url"`
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+// TOTPVerifyRequest represents a TOTP verification request.
+type TOTPVerifyRequest struct {
+	Code          string `json:"code,omitempty"`
+	RecoveryCode  string `json:"recovery_code,omitempty"`
+	DeviceLabel   string `json:"device_label,omitempty"`
+	DeviceTTLDays int    `json:"device_ttl_days,omitempty"`
+}
+
+// TOTPVerifyResponse represents the response from TOTP verification.
+type TOTPVerifyResponse struct {
+	DeviceToken      string  `json:"device_token"`
+	ExpiresAt        *string `json:"expires_at,omitempty"`
+	RecoveryCodeUsed bool    `json:"recovery_code_used"`
+}
+
+// SetupTOTP enrolls TOTP for the account.
+func (c *APIClient) SetupTOTP() (*TOTPSetupResponse, error) {
+	var result TOTPSetupResponse
+	if err := c.doRequest(http.MethodPost, "/v1/auth/totp/setup", http.StatusOK, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// VerifyTOTP verifies a TOTP or recovery code and trusts the device.
+func (c *APIClient) VerifyTOTP(req *TOTPVerifyRequest) (*TOTPVerifyResponse, error) {
+	var result TOTPVerifyResponse
+	if err := c.doRequest(http.MethodPost, "/v1/auth/totp/verify", http.StatusOK, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // UpdateWalletRequest represents a request to update wallet

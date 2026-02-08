@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -154,9 +153,13 @@ func (h *AuthHandler) RegisterRoutesWithMiddleware(app *fiber.App, middlewares .
 	group.Post("/login", h.Login)
 	group.Post("/refresh", h.RefreshToken)
 	group.Post("/logout", h.AuthMiddleware(), h.Logout)
-	group.Get("/me", h.AuthMiddleware(), h.GetMe)
-	group.Get("/wallet-key", h.AuthMiddleware(), h.GetWalletKey)
+	group.Get("/me", h.AuthMiddleware(), h.RequireTrustedDevice(), h.GetMe)
+	group.Get("/wallet-key", h.AuthMiddleware(), h.RequireTrustedDevice(), h.GetWalletKey)
 	group.Put("/wallet", h.AuthMiddleware(), h.UpdateWallet)
+	group.Post("/totp/setup", h.AuthMiddleware(), h.SetupTOTP)
+	group.Post("/totp/verify", h.AuthMiddleware(), h.VerifyTOTP)
+	group.Get("/devices", h.AuthMiddleware(), h.RequireTrustedDevice(), h.ListDevices)
+	group.Post("/devices/revoke", h.AuthMiddleware(), h.RequireTrustedDevice(), h.RevokeDevice)
 }
 
 // JWTClaims represents JWT claims
@@ -202,110 +205,12 @@ func (h *AuthHandler) CreateAccount(c fiber.Ctx) error {
 
 	ctx := c.Context()
 
-	var walletAddress *string
-
-	// If KMS is configured, handle wallet creation/import server-side
-	if h.kmsClient != nil {
-		var privateKeyHex string
-		var privateKey *ecdsa.PrivateKey
-		var err error
-
-		// Check if a private key was provided for import
-		if req.PrivateKey != nil && *req.PrivateKey != "" {
-			// Validate and parse the provided private key
-			privateKey, err = crypto.HexToECDSA(strings.TrimPrefix(*req.PrivateKey, "0x"))
-			if err != nil {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-					"error": "Invalid private key format",
-				})
-			}
-			privateKeyHex = hex.EncodeToString(crypto.FromECDSA(privateKey))
-			slog.Info("importing user-provided wallet key")
-		} else {
-			// Generate new key pair
-			privateKey, err = crypto.GenerateKey()
-			if err != nil {
-				slog.Error("failed to generate wallet key", "error", err)
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": "Failed to create wallet",
-				})
-			}
-			privateKeyHex = hex.EncodeToString(crypto.FromECDSA(privateKey))
-		}
-
-		// Get wallet address from public key
-		address := crypto.PubkeyToAddress(privateKey.PublicKey).Hex()
-		walletAddress = &address
-
-		// Encrypt via KMS
-		encryptedKey, err := h.kmsClient.Encrypt(ctx, privateKeyHex)
-		if err != nil {
-			slog.Error("failed to encrypt wallet key", "error", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to secure wallet",
-			})
-		}
-
-		// Zero out the private key from memory immediately
-		privateKey.D.SetUint64(0)
-
-		// Create account with wallet address
-		account, err := h.db.CreateAccount(ctx, walletAddress)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to create account",
-			})
-		}
-
-		// Store encrypted key in DB
-		if err := h.db.StoreEncryptedKey(ctx, account.ID, encryptedKey, h.kmsClient.KeyID()); err != nil {
-			slog.Error("failed to store encrypted key", "error", err, "account_id", account.ID)
-			// Account was created but key storage failed - this is a critical error
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to store wallet key",
-			})
-		}
-
-		// Create session
-		ip := c.IP()
-		userAgent := string(c.Request().Header.UserAgent())
-		_, refreshToken, err := h.db.CreateSession(ctx, account.ID, net.ParseIP(ip), userAgent, h.config.RefreshTokenTTL)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to create session",
-			})
-		}
-
-		// Generate access token
-		accessToken, expiresAt, err := h.generateAccessToken(account.ID.String(), account.AccountNumber)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to generate access token",
-			})
-		}
-
-		// Generate recovery file content
-		recoveryFile := generateRecoveryFile(account.AccountNumber, account.ID.String())
-
-		// Set httpOnly cookies
-		refreshExpiry := time.Now().UTC().Add(h.config.RefreshTokenTTL)
-		h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
-
-		slog.Info("account created with KMS-encrypted wallet",
-			"account_id", account.ID,
-			"wallet_address", address,
-			"imported", req.PrivateKey != nil,
-		)
-
-		return c.Status(fiber.StatusCreated).JSON(CreateAccountResponse{
-			AccountNumber: account.AccountNumber,
-			WalletAddress: address,
-			ExpiresAt:     expiresAt,
-			RecoveryFile:  recoveryFile,
+	if req.PrivateKey != nil && *req.PrivateKey != "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Wallet uploads require TOTP setup. Create the account first, then upload the wallet.",
 		})
 	}
 
-	// Fallback: No KMS configured (development mode)
 	// Validate wallet address if provided
 	if req.WalletAddress != nil && !isValidWalletAddress(*req.WalletAddress) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -367,6 +272,9 @@ type LoginResponse struct {
 	AccountNumber string    `json:"account_number"`
 	ExpiresAt     time.Time `json:"expires_at"`
 	WalletAddress *string   `json:"wallet_address,omitempty"`
+	TOTPRequired  bool      `json:"totp_required"`
+	DeviceTrusted bool      `json:"device_trusted"`
+	EscrowEnabled bool      `json:"wallet_escrow_enabled"`
 }
 
 // Login authenticates an account by account number
@@ -466,10 +374,25 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	h.setAuthCookies(c, accessToken, refreshToken, expiresAt, refreshExpiry)
 
 	// Build response
+	deviceToken := getDeviceToken(c)
+	deviceTrusted := false
+	totpRequired := false
+	if account.WalletEscrow {
+		if deviceToken != "" {
+			if _, err := h.db.GetDeviceByToken(ctx, account.ID, deviceToken); err == nil {
+				deviceTrusted = true
+			}
+		}
+		totpRequired = !deviceTrusted
+	}
+
 	response := LoginResponse{
 		AccountNumber: account.AccountNumber,
 		ExpiresAt:     expiresAt,
 		WalletAddress: account.WalletAddress,
+		TOTPRequired:  totpRequired,
+		DeviceTrusted: deviceTrusted,
+		EscrowEnabled: account.WalletEscrow,
 	}
 
 	return c.JSON(response)
@@ -633,13 +556,15 @@ func (h *AuthHandler) GetMe(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"id":             account.ID,
-		"account_number": account.AccountNumber,
-		"wallet_address": account.WalletAddress,
-		"balance_usdc":   account.BalanceUSDC,
-		"status":         account.Status,
-		"created_at":     account.CreatedAt,
-		"last_login_at":  account.LastLoginAt,
+		"id":                    account.ID,
+		"account_number":        account.AccountNumber,
+		"wallet_address":        account.WalletAddress,
+		"balance_usdc":          account.BalanceUSDC,
+		"status":                account.Status,
+		"wallet_escrow_enabled": account.WalletEscrow,
+		"totp_enabled":          account.TOTPEnabled,
+		"created_at":            account.CreatedAt,
+		"last_login_at":         account.LastLoginAt,
 	})
 }
 
@@ -682,6 +607,18 @@ func (h *AuthHandler) GetWalletKey(c fiber.Ctx) error {
 	}
 
 	ctx := c.Context()
+
+	account, err := h.db.GetAccountByID(ctx, accountID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Account not found",
+		})
+	}
+	if !account.WalletEscrow {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "No wallet stored for this account",
+		})
+	}
 
 	// Require a fresh session (logged in within the last 5 minutes) to retrieve wallet key.
 	// This protects against stolen session cookies while allowing multi-device use.
@@ -890,6 +827,38 @@ func (h *AuthHandler) UpdateWallet(c fiber.Ctx) error {
 
 	ctx := c.Context()
 
+	account, err := h.db.GetAccountByID(ctx, accountID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Account not found",
+		})
+	}
+
+	if h.kmsClient == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "KMS not configured",
+		})
+	}
+	if !account.TOTPEnabled {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "TOTP is required before uploading a wallet",
+		})
+	}
+	deviceToken := getDeviceToken(c)
+	if deviceToken == "" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":         "TOTP required",
+			"totp_required": true,
+		})
+	}
+	if _, err := h.db.GetDeviceByToken(ctx, accountID, deviceToken); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":         "TOTP required",
+			"totp_required": true,
+		})
+	}
+	_ = h.db.TouchDevice(ctx, accountID, deviceToken)
+
 	// Validate and parse the private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(req.PrivateKey, "0x"))
 	if err != nil {
@@ -920,6 +889,10 @@ func (h *AuthHandler) UpdateWallet(c fiber.Ctx) error {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to store wallet key",
 			})
+		}
+
+		if err := h.db.SetWalletEscrowEnabled(ctx, accountID, true); err != nil {
+			slog.Error("failed to update wallet escrow status", "error", err, "account_id", accountID)
 		}
 	}
 
@@ -979,4 +952,3 @@ To recover your account:
 This file was generated automatically. Do not modify its contents.
 `, accountNumber, accountID, time.Now().UTC().Format(time.RFC3339), accountNumber)
 }
-

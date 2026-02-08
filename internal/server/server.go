@@ -94,6 +94,12 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.Server.ProxyHeader != "" {
 		fiberConfig.ProxyHeader = cfg.Server.ProxyHeader
 	}
+	if len(cfg.Server.TrustedProxies) > 0 {
+		fiberConfig.TrustProxy = true
+		fiberConfig.TrustProxyConfig = fiber.TrustProxyConfig{
+			Proxies: cfg.Server.TrustedProxies,
+		}
+	}
 
 	app := fiber.New(fiberConfig)
 
@@ -149,7 +155,7 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(cors.New(cors.Config{
 		AllowOrigins:     s.config.Dashboard.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization", middleware.RequestIDHeader},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization", "X-Stronghold-Device", middleware.RequestIDHeader},
 		ExposeHeaders:    []string{"X-PAYMENT-RESPONSE", middleware.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,

@@ -38,11 +38,11 @@ func (h *AccountHandler) RegisterRoutes(app *fiber.App, authHandler *AuthHandler
 	group := app.Group("/v1/account")
 
 	// All account routes require authentication
-	group.Get("/", authHandler.AuthMiddleware(), h.GetAccount)
-	group.Get("/usage", authHandler.AuthMiddleware(), h.GetUsage)
-	group.Get("/usage/stats", authHandler.AuthMiddleware(), h.GetUsageStats)
-	group.Post("/deposit", authHandler.AuthMiddleware(), h.InitiateDeposit)
-	group.Get("/deposits", authHandler.AuthMiddleware(), h.GetDeposits)
+	group.Get("/", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetAccount)
+	group.Get("/usage", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetUsage)
+	group.Get("/usage/stats", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetUsageStats)
+	group.Post("/deposit", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.InitiateDeposit)
+	group.Get("/deposits", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetDeposits)
 	// NOTE: Wallet linking removed - wallets are generated server-side with KMS encryption.
 	// Changing wallet requires providing the private key (via CLI only).
 }
@@ -89,15 +89,17 @@ func (h *AccountHandler) GetAccount(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"id":              account.ID,
-		"account_number":  account.AccountNumber,
-		"wallet_address":  account.WalletAddress,
-		"balance_usdc":    account.BalanceUSDC,
-		"status":          account.Status,
-		"created_at":      account.CreatedAt,
-		"updated_at":      account.UpdatedAt,
-		"last_login_at":   account.LastLoginAt,
-		"deposit_stats":   depositStats,
+		"id":                    account.ID,
+		"account_number":        account.AccountNumber,
+		"wallet_address":        account.WalletAddress,
+		"balance_usdc":          account.BalanceUSDC,
+		"status":                account.Status,
+		"wallet_escrow_enabled": account.WalletEscrow,
+		"totp_enabled":          account.TOTPEnabled,
+		"created_at":            account.CreatedAt,
+		"updated_at":            account.UpdatedAt,
+		"last_login_at":         account.LastLoginAt,
+		"deposit_stats":         depositStats,
 	})
 }
 
@@ -230,10 +232,10 @@ func (h *AccountHandler) GetUsageStats(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"period_days":    req.Days,
-		"total_stats":    stats,
+		"period_days":     req.Days,
+		"total_stats":     stats,
 		"daily_breakdown": dailyStats,
-		"endpoint_stats": endpointStats,
+		"endpoint_stats":  endpointStats,
 	})
 }
 
@@ -322,11 +324,11 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 
 	// Create deposit record
 	deposit := &db.Deposit{
-		AccountID:    accountID,
-		Provider:     provider,
-		AmountUSDC:   req.AmountUSDC,
-		FeeUSDC:      calculateFee(req.AmountUSDC, provider),
-		Status:       db.DepositStatusPending,
+		AccountID:  accountID,
+		Provider:   provider,
+		AmountUSDC: req.AmountUSDC,
+		FeeUSDC:    calculateFee(req.AmountUSDC, provider),
+		Status:     db.DepositStatusPending,
 	}
 
 	if account.WalletAddress != nil {

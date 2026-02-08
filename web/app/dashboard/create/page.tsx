@@ -33,7 +33,7 @@ export default function CreateAccountPage() {
     try {
       const result = await createAccount();
       setAccountNumber(result.accountNumber);
-      setWalletAddress(result.walletAddress);
+      setWalletAddress(result.walletAddress || '');
       setRecoveryFile(result.recoveryFile);
       setStep('success');
     } catch (err) {
@@ -161,14 +161,16 @@ export default function CreateAccountPage() {
                 </div>
               </div>
 
-              <div className="bg-[#0a0a0a] border border-[#333] rounded-lg p-4">
-                <label className="block text-xs text-gray-500 mb-1">
-                  Your Wallet Address (Base USDC)
-                </label>
-                <div className="font-mono text-sm text-[#00D4AA] break-all">
-                  {walletAddress}
+              {walletAddress ? (
+                <div className="bg-[#0a0a0a] border border-[#333] rounded-lg p-4">
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Your Wallet Address (Base USDC)
+                  </label>
+                  <div className="font-mono text-sm text-[#00D4AA] break-all">
+                    {walletAddress}
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </div>
 
             <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-6">

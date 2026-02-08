@@ -32,7 +32,7 @@ type WorkerConfig struct {
 // DefaultWorkerConfig returns sensible defaults for the worker
 func DefaultWorkerConfig() *WorkerConfig {
 	return &WorkerConfig{
-		RetryInterval:           30 * time.Second,
+		RetryInterval:           10 * time.Second,
 		MaxRetryAttempts:        5,
 		BatchSize:               100,
 		ExpirationCheckInterval: 1 * time.Minute,
@@ -47,6 +47,8 @@ type Worker struct {
 	httpClient *http.Client
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
+	rngMu      sync.Mutex
+	rng        *rand.Rand
 }
 
 // NewWorker creates a new settlement worker
@@ -62,6 +64,7 @@ func NewWorker(database *db.DB, x402Config *config.X402Config, cfg *WorkerConfig
 			Timeout: 30 * time.Second,
 		},
 		stopCh: make(chan struct{}),
+		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -240,12 +243,12 @@ func (w *Worker) expireStaleReservations(ctx context.Context) {
 	}
 }
 
-// calculateBackoff returns the backoff duration for a given attempt number
+// calculateBackoff returns the backoff duration for a given attempt number.
 // Uses exponential backoff with jitter to prevent thundering herd:
-// Base delays: 5s, 10s, 20s, 40s, 80s + random jitter up to 50% of delay
+// Base delays: 2s, 4s, 8s, 16s, capped at 30s, plus random jitter up to 50% of delay.
 func (w *Worker) calculateBackoff(attempts int) time.Duration {
-	baseDelay := 5 * time.Second
-	maxDelay := 5 * time.Minute
+	baseDelay := 2 * time.Second
+	maxDelay := 30 * time.Second
 
 	delay := baseDelay
 	for i := 0; i < attempts; i++ {
@@ -257,7 +260,14 @@ func (w *Worker) calculateBackoff(attempts int) time.Duration {
 	}
 
 	// Add random jitter: 0 to 50% of the delay
-	jitter := time.Duration(rand.Int63n(int64(delay / 2)))
+	var jitter time.Duration
+	if w.rng == nil {
+		jitter = time.Duration(rand.Int63n(int64(delay / 2)))
+	} else {
+		w.rngMu.Lock()
+		jitter = time.Duration(w.rng.Int63n(int64(delay / 2)))
+		w.rngMu.Unlock()
+	}
 	return delay + jitter
 }
 
