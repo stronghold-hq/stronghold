@@ -79,6 +79,7 @@ type X402Config struct {
 	SolanaWalletAddress string   // Solana wallet address
 	FacilitatorURL      string   // x402 facilitator URL
 	Networks            []string // Supported payment networks (e.g. ["base", "solana"])
+	SolanaFeePayer      string   // Facilitator's Solana pubkey for paying tx fees
 }
 
 // WalletForNetwork returns the wallet address for the given network.
@@ -190,6 +191,7 @@ func Load() *Config {
 			SolanaWalletAddress: getEnv("X402_SOLANA_WALLET_ADDRESS", ""),
 			FacilitatorURL:      getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
 			Networks:            loadX402Networks(),
+			SolanaFeePayer:      getEnv("X402_SOLANA_FEE_PAYER", ""),
 		},
 		Stripe: StripeConfig{
 			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),

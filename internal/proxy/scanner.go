@@ -213,6 +213,7 @@ type paymentOption struct {
 	Currency       string `json:"currency"`
 	FacilitatorURL string `json:"facilitator_url"`
 	Description    string `json:"description"`
+	FeePayer       string `json:"fee_payer,omitempty"`
 }
 
 // parsePaymentRequired parses a 402 response to extract payment requirements.
@@ -271,6 +272,7 @@ func optionToRequirements(opt *paymentOption) *wallet.PaymentRequirements {
 		Currency:       opt.Currency,
 		FacilitatorURL: opt.FacilitatorURL,
 		Description:    opt.Description,
+		FeePayer:       opt.FeePayer,
 	}
 }
 

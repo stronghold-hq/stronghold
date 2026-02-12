@@ -261,6 +261,7 @@ fly secrets set X402_EVM_WALLET_ADDRESS=0x<your-base-usdc-address> -a stronghold
 fly secrets set X402_SOLANA_WALLET_ADDRESS=<your-solana-usdc-address> -a stronghold-api
 fly secrets set X402_NETWORKS=base,solana -a stronghold-api
 fly secrets set X402_FACILITATOR_URL=http://stronghold-facilitator.internal:8402 -a stronghold-api
+fly secrets set X402_SOLANA_FEE_PAYER=<facilitator-solana-pubkey> -a stronghold-api
 
 # Stripe (wallet top-up / fiat on-ramp)
 fly secrets set STRIPE_SECRET_KEY=sk_live_... -a stronghold-api

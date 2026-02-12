@@ -337,7 +337,7 @@ func (m *X402Middleware) requirePaymentResponse(c fiber.Ctx, amount *big.Int) er
 		if recipient == "" {
 			continue // skip networks without a configured wallet
 		}
-		accepts = append(accepts, map[string]interface{}{
+		option := map[string]interface{}{
 			"scheme":          "x402",
 			"network":         network,
 			"recipient":       recipient,
@@ -345,7 +345,11 @@ func (m *X402Middleware) requirePaymentResponse(c fiber.Ctx, amount *big.Int) er
 			"currency":        "USDC",
 			"facilitator_url": m.config.FacilitatorURL,
 			"description":     "Citadel security scan",
-		})
+		}
+		if wallet.IsSolanaNetwork(network) && m.config.SolanaFeePayer != "" {
+			option["fee_payer"] = m.config.SolanaFeePayer
+		}
+		accepts = append(accepts, option)
 	}
 
 	if len(accepts) == 0 {
