@@ -278,11 +278,17 @@ func (w *Worker) settlePayment(paymentHeader string) (string, error) {
 		return "", fmt.Errorf("failed to parse payment: %w", err)
 	}
 
+	// Look up the wallet address for this payment's network
+	recipientAddr := w.x402Config.WalletForNetwork(payload.Network)
+	if recipientAddr == "" {
+		return "", fmt.Errorf("no wallet configured for network: %s", payload.Network)
+	}
+
 	// Build the original payment requirements for facilitator
 	originalReq := &wallet.PaymentRequirements{
 		Scheme:    "x402",
-		Network:   w.x402Config.Network,
-		Recipient: w.x402Config.WalletAddress,
+		Network:   payload.Network,
+		Recipient: recipientAddr,
 		Amount:    payload.Amount,
 		Currency:  "USDC",
 	}

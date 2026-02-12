@@ -51,19 +51,47 @@ stronghold status
 
 ### CLI Commands
 
-| Command                    | Description                              |
-|----------------------------|------------------------------------------|
-| stronghold doctor          | Check system prerequisites               |
-| stronghold init            | Interactive installation (requires sudo) |
-| stronghold enable          | Start proxy, enable interception         |
-| stronghold disable         | Stop proxy, restore direct access        |
-| stronghold status          | Show proxy status and statistics         |
-| stronghold account balance | Check account balance                    |
-| stronghold account deposit | Show deposit options                     |
-| stronghold wallet export   | Export private key for backup            |
-| stronghold wallet replace  | Replace wallet with a new private key    |
-| stronghold config get      | Get configuration value                  |
-| stronghold config set      | Set configuration value                  |
+| Command                    | Description                                           |
+|----------------------------|-------------------------------------------------------|
+| stronghold doctor          | Check system prerequisites                            |
+| stronghold init            | Interactive setup (requires sudo)                     |
+| stronghold init --yes      | Non-interactive setup with defaults                   |
+| stronghold enable          | Start proxy, enable interception                      |
+| stronghold disable         | Stop proxy, restore direct access                     |
+| stronghold status          | Show proxy status and statistics                      |
+| stronghold account balance | Check balance (Base and Solana wallets)               |
+| stronghold account deposit | Show deposit addresses (Base and Solana)              |
+| stronghold wallet export   | Export private keys for backup (both chains)          |
+| stronghold wallet replace  | Replace wallet (use --chain base or --chain solana)   |
+| stronghold config get      | Get configuration value                               |
+| stronghold config set      | Set configuration value                               |
+
+### Wallet Import During Init
+
+```bash
+# Import both EVM and Solana wallets (non-interactive)
+stronghold init --yes --private-key 0x<evm-hex-key> --solana-private-key <base58-solana-key>
+
+# Import only EVM wallet (Solana auto-generated)
+stronghold init --yes --private-key 0x<evm-hex-key>
+
+# Import only Solana wallet (EVM auto-generated)
+stronghold init --yes --solana-private-key <base58-solana-key>
+```
+
+### Wallet Replace
+
+```bash
+# Replace Base (EVM) wallet
+stronghold wallet replace --chain base
+
+# Replace Solana wallet
+stronghold wallet replace --chain solana
+
+# Non-interactive with env var
+STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace --yes
+STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace --chain solana --yes
+```
 
 ### Response Headers for Agentic Integration
 
@@ -163,8 +191,10 @@ Decisions: ALLOW (safe), WARN (review), BLOCK (reject)
 Both proxy and API require a funded account:
 
 1. **Create account**: https://stronghold.security/dashboard or `stronghold init`
-2. **Deposit USDC**: Via dashboard (Stripe, Coinbase Pay) or direct transfer
+2. **Deposit USDC**: Via dashboard (Stripe, Coinbase Pay) or direct transfer on Base or Solana
 3. **Pay-per-request**: $0.001 per scan
+
+Payment networks: Base (EVM) and Solana. Both use USDC.
 
 Check balance: `stronghold account balance`
 Add funds: `stronghold account deposit`

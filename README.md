@@ -389,14 +389,15 @@ Copy `.env.example` to `.env` and configure the required values. See `.env.examp
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `X402_WALLET_ADDRESS` | Yes* | - | USDC receiving address |
-| `X402_NETWORK` | No | `base` | Network identifier: `base` or `base-sepolia` |
+| `X402_EVM_WALLET_ADDRESS` | Yes* | - | EVM USDC receiving address (Base) |
+| `X402_SOLANA_WALLET_ADDRESS` | No | - | Solana USDC receiving address |
+| `X402_NETWORKS` | No | `base` | Supported networks (comma-separated): `base`, `solana`, `base-sepolia`, `solana-devnet` |
 | `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification layer |
 | `STRONGHOLD_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity layer |
 | `STRONGHOLD_BLOCK_THRESHOLD` | No | `0.55` | Score threshold for BLOCK decisions |
 | `STRONGHOLD_WARN_THRESHOLD` | No | `0.35` | Score threshold for WARN decisions |
 
-*When `X402_WALLET_ADDRESS` is not configured, the server runs in development mode without payment verification.
+*When no wallet addresses are configured, the server runs in development mode without payment verification.
 
 **x402 Facilitator** (settles payments on-chain):
 

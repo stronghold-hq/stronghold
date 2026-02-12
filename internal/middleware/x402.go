@@ -77,16 +77,24 @@ func (m *X402Middleware) GetRoutes() []PriceRoute {
 	}
 }
 
-// GetNetwork returns the configured payment network
+// GetNetwork returns the first configured payment network (backward compat for pricing API)
 func (m *X402Middleware) GetNetwork() string {
-	return m.config.Network
+	if len(m.config.Networks) > 0 {
+		return m.config.Networks[0]
+	}
+	return ""
+}
+
+// GetNetworks returns all configured payment networks
+func (m *X402Middleware) GetNetworks() []string {
+	return m.config.Networks
 }
 
 // RequirePayment returns middleware that requires x402 payment
 func (m *X402Middleware) RequirePayment(price float64) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Skip if wallet address not configured (allow all in dev mode)
-		if m.config.WalletAddress == "" {
+		// Skip if no payment networks configured (allow all in dev mode)
+		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
@@ -116,8 +124,8 @@ func (m *X402Middleware) RequirePayment(price float64) fiber.Handler {
 // If settlement fails, a 503 is returned and the service result is not delivered.
 func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Skip if wallet address not configured (allow all in dev mode)
-		if m.config.WalletAddress == "" {
+		// Skip if no payment networks configured (allow all in dev mode)
+		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
@@ -149,7 +157,7 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 				PaymentNonce:    payload.Nonce,
 				PaymentHeader:   paymentHeader,
 				PayerAddress:    payload.Payer,
-				ReceiverAddress: m.config.WalletAddress,
+				ReceiverAddress: m.config.WalletForNetwork(payload.Network),
 				Endpoint:        c.Path(),
 				AmountUSDC:      price,
 				Network:         payload.Network,
@@ -261,8 +269,8 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 // This is used when database-backed atomic payments are not available.
 func (m *X402Middleware) RequirePaymentAndSettle(price float64) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Skip if wallet address not configured (allow all in dev mode)
-		if m.config.WalletAddress == "" {
+		// Skip if no payment networks configured (allow all in dev mode)
+		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
@@ -321,17 +329,35 @@ func GetPaymentTransaction(c fiber.Ctx) *db.PaymentTransaction {
 func (m *X402Middleware) requirePaymentResponse(c fiber.Ctx, amount *big.Int) error {
 	c.Status(fiber.StatusPaymentRequired)
 
-	response := map[string]interface{}{
-		"error": "Payment required",
-		"payment_requirements": map[string]interface{}{
+	accepts := []map[string]interface{}{}
+
+	// Build accepts array from configured networks
+	for _, network := range m.config.Networks {
+		recipient := m.config.WalletForNetwork(network)
+		if recipient == "" {
+			continue // skip networks without a configured wallet
+		}
+		accepts = append(accepts, map[string]interface{}{
 			"scheme":          "x402",
-			"network":         m.config.Network,
-			"recipient":       m.config.WalletAddress,
+			"network":         network,
+			"recipient":       recipient,
 			"amount":          amount.String(),
 			"currency":        "USDC",
 			"facilitator_url": m.config.FacilitatorURL,
 			"description":     "Citadel security scan",
-		},
+		})
+	}
+
+	if len(accepts) == 0 {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "No payment networks configured",
+		})
+	}
+
+	response := map[string]interface{}{
+		"error":                "Payment required",
+		"payment_requirements": accepts[0], // backward compat: primary option
+		"accepts":              accepts,     // multi-chain: all options
 	}
 
 	return c.JSON(response)
@@ -354,27 +380,52 @@ func (m *X402Middleware) verifyPayment(paymentHeader string, expectedAmount *big
 		return false, fmt.Errorf("amount mismatch: expected %s, got %s", expectedAmount.String(), payload.Amount)
 	}
 
-	// Verify the recipient is our wallet
-	// Use Ethereum address normalization rather than case-insensitive comparison
-	// to properly handle checksummed addresses
-	expectedAddr := common.HexToAddress(m.config.WalletAddress)
-	receivedAddr := common.HexToAddress(payload.Receiver)
-	if expectedAddr != receivedAddr {
-		return false, fmt.Errorf("recipient mismatch: expected %s, got %s", m.config.WalletAddress, payload.Receiver)
+	// Verify the payment network is one we support
+	networkConfigured := false
+	for _, n := range m.config.Networks {
+		if n == payload.Network {
+			networkConfigured = true
+			break
+		}
+	}
+	if !networkConfigured {
+		return false, fmt.Errorf("unsupported payment network: %s (configured: %v)", payload.Network, m.config.Networks)
 	}
 
-	// Verify payment signature
-	if err := wallet.VerifyPaymentSignature(payload, payload.Payer); err != nil {
-		return false, fmt.Errorf("invalid signature: %w", err)
+	// Look up the wallet address for this network
+	expectedWallet := m.config.WalletForNetwork(payload.Network)
+	if expectedWallet == "" {
+		return false, fmt.Errorf("no wallet configured for network: %s", payload.Network)
+	}
+
+	// Verify the recipient and signature based on network type
+	if wallet.IsSolanaNetwork(payload.Network) {
+		// Solana: simple string comparison for base58 addresses
+		if payload.Receiver != expectedWallet {
+			return false, fmt.Errorf("recipient mismatch: expected %s, got %s", expectedWallet, payload.Receiver)
+		}
+		// Solana signature verification is handled by the facilitator
+	} else {
+		// EVM: use Ethereum address normalization for checksummed addresses
+		expectedAddr := common.HexToAddress(expectedWallet)
+		receivedAddr := common.HexToAddress(payload.Receiver)
+		if expectedAddr != receivedAddr {
+			return false, fmt.Errorf("recipient mismatch: expected %s, got %s", expectedWallet, payload.Receiver)
+		}
+
+		// Verify EIP-3009 signature locally
+		if err := wallet.VerifyPaymentSignature(payload, payload.Payer); err != nil {
+			return false, fmt.Errorf("invalid signature: %w", err)
+		}
 	}
 
 	// Build the original payment requirements for facilitator
 	originalReq := &wallet.PaymentRequirements{
-		Scheme:     "x402",
-		Network:    m.config.Network,
-		Recipient:  m.config.WalletAddress,
-		Amount:     expectedAmount.String(),
-		Currency:   "USDC",
+		Scheme:    "x402",
+		Network:   payload.Network,
+		Recipient: expectedWallet,
+		Amount:    expectedAmount.String(),
+		Currency:  "USDC",
 	}
 
 	// Call facilitator to verify payment is valid and not already spent
@@ -450,11 +501,17 @@ func (m *X402Middleware) settlePayment(paymentHeader string) (string, error) {
 		return "", fmt.Errorf("failed to parse payment: %w", err)
 	}
 
+	// Look up the wallet address for this payment's network
+	recipientAddr := m.config.WalletForNetwork(payload.Network)
+	if recipientAddr == "" {
+		return "", fmt.Errorf("no wallet configured for network: %s", payload.Network)
+	}
+
 	// Build the original payment requirements for facilitator
 	originalReq := &wallet.PaymentRequirements{
 		Scheme:    "x402",
-		Network:   m.config.Network,
-		Recipient: m.config.WalletAddress,
+		Network:   payload.Network,
+		Recipient: recipientAddr,
 		Amount:    payload.Amount,
 		Currency:  "USDC",
 	}
@@ -526,7 +583,7 @@ func (m *X402Middleware) settlePayment(paymentHeader string) (string, error) {
 
 // PaymentResponse adds payment response header after successful processing
 func (m *X402Middleware) PaymentResponse(c fiber.Ctx, paymentID string) {
-	if m.config.WalletAddress == "" {
+	if !m.config.HasPayments() {
 		return
 	}
 
@@ -576,8 +633,8 @@ func (m *X402Middleware) Middleware() fiber.Handler {
 			return c.Next()
 		}
 
-		// Skip if wallet not configured
-		if m.config.WalletAddress == "" {
+		// Skip if no payment networks configured
+		if !m.config.HasPayments() {
 			return c.Next()
 		}
 

@@ -75,9 +75,31 @@ type DashboardConfig struct {
 
 // X402Config holds x402 payment configuration
 type X402Config struct {
-	WalletAddress  string
-	FacilitatorURL string
-	Network        string
+	EVMWalletAddress    string   // EVM wallet address (Base)
+	SolanaWalletAddress string   // Solana wallet address
+	FacilitatorURL      string   // x402 facilitator URL
+	Networks            []string // Supported payment networks (e.g. ["base", "solana"])
+}
+
+// WalletForNetwork returns the wallet address for the given network.
+// Returns empty string if no wallet is configured for that network.
+func (c *X402Config) WalletForNetwork(network string) string {
+	// Solana networks use the Solana wallet
+	if network == "solana" || network == "solana-devnet" {
+		return c.SolanaWalletAddress
+	}
+	// EVM networks use the EVM wallet
+	return c.EVMWalletAddress
+}
+
+// HasPayments returns true if at least one network has a configured wallet
+func (c *X402Config) HasPayments() bool {
+	for _, network := range c.Networks {
+		if c.WalletForNetwork(network) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // StripeConfig holds Stripe payment configuration
@@ -161,9 +183,10 @@ func Load() *Config {
 			AllowedOrigins: getEnvSlice("DASHBOARD_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		},
 		X402: X402Config{
-			WalletAddress:   getEnv("X402_WALLET_ADDRESS", ""),
-			FacilitatorURL: getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
-			Network:        getEnv("X402_NETWORK", "base"),
+			EVMWalletAddress:    getEnvWithFallback("X402_EVM_WALLET_ADDRESS", "X402_WALLET_ADDRESS", ""),
+			SolanaWalletAddress: getEnv("X402_SOLANA_WALLET_ADDRESS", ""),
+			FacilitatorURL:      getEnv("X402_FACILITATOR_URL", "https://x402.org/facilitator"),
+			Networks:            loadX402Networks(),
 		},
 		Stripe: StripeConfig{
 			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),
@@ -200,6 +223,17 @@ func Load() *Config {
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvWithFallback tries the primary key first, then falls back to a legacy key
+func getEnvWithFallback(primary, fallback, defaultValue string) string {
+	if value := os.Getenv(primary); value != "" {
+		return value
+	}
+	if value := os.Getenv(fallback); value != "" {
 		return value
 	}
 	return defaultValue
@@ -246,6 +280,27 @@ func getEnvSlice(key string, defaultValue []string) []string {
 		return strings.Split(value, ",")
 	}
 	return defaultValue
+}
+
+// loadX402Networks loads the list of supported payment networks.
+// Reads from X402_NETWORKS (comma-separated) first, falls back to
+// the legacy X402_NETWORK (singular) env var for backward compat.
+func loadX402Networks() []string {
+	if value := os.Getenv("X402_NETWORKS"); value != "" {
+		var networks []string
+		for _, n := range strings.Split(value, ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				networks = append(networks, n)
+			}
+		}
+		return networks
+	}
+	// Backward compatibility: fall back to singular X402_NETWORK
+	if value := os.Getenv("X402_NETWORK"); value != "" {
+		return []string{value}
+	}
+	return []string{"base"}
 }
 
 // Validate checks that all required configuration is present.

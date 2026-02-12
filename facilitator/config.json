@@ -23,6 +23,26 @@
           "rate_limit": 25
         }
       ]
+    },
+    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": {
+      "_comment": "Solana Mainnet",
+      "signers": ["$FACILITATOR_SOLANA_PRIVATE_KEY"],
+      "rpc": [
+        {
+          "http": "$RPC_URL_SOLANA",
+          "rate_limit": 25
+        }
+      ]
+    },
+    "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": {
+      "_comment": "Solana Devnet",
+      "signers": ["$FACILITATOR_SOLANA_PRIVATE_KEY"],
+      "rpc": [
+        {
+          "http": "$RPC_URL_SOLANA_DEVNET",
+          "rate_limit": 25
+        }
+      ]
     }
   },
   "schemes": [
@@ -33,6 +53,10 @@
     {
       "id": "v2-eip155-exact",
       "chains": "eip155:*"
+    },
+    {
+      "id": "v2-solana-exact",
+      "chains": "solana:*"
     }
   ]
 }

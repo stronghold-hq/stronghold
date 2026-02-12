@@ -16,7 +16,7 @@ func TestReadPrivateKey_ValidFile(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	key, err := readPrivateKey(keyFile)
+	key, err := readPrivateKey(keyFile, false)
 	if err != nil {
 		t.Fatalf("readPrivateKey failed: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestReadPrivateKey_ValidFile(t *testing.T) {
 }
 
 func TestReadPrivateKey_FileNotFound(t *testing.T) {
-	_, err := readPrivateKey("/nonexistent/path/to/key.txt")
+	_, err := readPrivateKey("/nonexistent/path/to/key.txt", false)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file, got nil")
 	}
@@ -45,7 +45,7 @@ func TestReadPrivateKey_EmptyFile(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	_, err = readPrivateKey(keyFile)
+	_, err = readPrivateKey(keyFile, false)
 	if err == nil {
 		t.Fatal("expected error for empty file, got nil")
 	}
@@ -67,7 +67,7 @@ func TestReadPrivateKey_LargeFile(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	_, err = readPrivateKey(keyFile)
+	_, err = readPrivateKey(keyFile, false)
 	if err == nil {
 		t.Fatal("expected error for large file, got nil")
 	}
@@ -86,7 +86,7 @@ func TestReadPrivateKey_WithWhitespace(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	key, err := readPrivateKey(keyFile)
+	key, err := readPrivateKey(keyFile, false)
 	if err != nil {
 		t.Fatalf("readPrivateKey failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestReadPrivateKey_With0xPrefix(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	key, err := readPrivateKey(keyFile)
+	key, err := readPrivateKey(keyFile, false)
 	if err != nil {
 		t.Fatalf("readPrivateKey failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestReadPrivateKey_EnvVar(t *testing.T) {
 	validKey := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 	t.Setenv("STRONGHOLD_PRIVATE_KEY", validKey)
 
-	key, err := readPrivateKey("")
+	key, err := readPrivateKey("", false)
 	if err != nil {
 		t.Fatalf("readPrivateKey failed: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestReadPrivateKey_ZerosFileData(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	key, err := readPrivateKey(keyFile)
+	key, err := readPrivateKey(keyFile, false)
 	if err != nil {
 		t.Fatalf("readPrivateKey failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestReadPrivateKey_NoSource(t *testing.T) {
 	os.Unsetenv("STRONGHOLD_PRIVATE_KEY")
 
 	// No file, no env var, and stdin is not a pipe in tests
-	_, err := readPrivateKey("")
+	_, err := readPrivateKey("", false)
 	if err == nil {
 		t.Fatal("expected error when no source provided, got nil")
 	}
@@ -190,7 +190,7 @@ func TestReadPrivateKey_PermissionDenied(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	_, err = readPrivateKey(keyFile)
+	_, err = readPrivateKey(keyFile, false)
 	if err == nil {
 		t.Fatal("expected error for permission denied, got nil")
 	}

@@ -40,8 +40,11 @@ services:
       dockerfile: Dockerfile
     environment:
       FACILITATOR_PRIVATE_KEY: ${FACILITATOR_PRIVATE_KEY:-}
+      FACILITATOR_SOLANA_PRIVATE_KEY: ${FACILITATOR_SOLANA_PRIVATE_KEY:-}
       RPC_URL_BASE: ${RPC_URL_BASE:-https://mainnet.base.org}
       RPC_URL_BASE_SEPOLIA: ${RPC_URL_BASE_SEPOLIA:-https://sepolia.base.org}
+      RPC_URL_SOLANA: ${RPC_URL_SOLANA:-https://api.mainnet-beta.solana.com}
+      RPC_URL_SOLANA_DEVNET: ${RPC_URL_SOLANA_DEVNET:-https://api.devnet.solana.com}
       RUST_LOG: debug
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8402/health"]
@@ -62,9 +65,10 @@ services:
       DB_PASSWORD: testnet_password
       DB_NAME: stronghold
       DB_SSLMODE: disable
-      # x402 Configuration - Base Sepolia testnet
-      X402_NETWORK: base-sepolia
-      X402_WALLET_ADDRESS: ${API_WALLET_ADDRESS:-0x0000000000000000000000000000000000000000}
+      # x402 Configuration - Base Sepolia + Solana Devnet testnet
+      X402_NETWORKS: base-sepolia,solana-devnet
+      X402_EVM_WALLET_ADDRESS: ${API_EVM_WALLET_ADDRESS:-0x0000000000000000000000000000000000000000}
+      X402_SOLANA_WALLET_ADDRESS: ${API_SOLANA_WALLET_ADDRESS:-}
       X402_FACILITATOR_URL: http://x402-facilitator:8402
       # JWT (generate with: openssl rand -base64 32)
       JWT_SECRET: testnet_jwt_secret_change_in_production

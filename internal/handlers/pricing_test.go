@@ -15,9 +15,9 @@ import (
 
 func TestGetPricing_ReturnsAllRoutes(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricingCfg := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -67,9 +67,9 @@ func TestGetPricing_ReturnsAllRoutes(t *testing.T) {
 
 func TestGetPricing_HasDescriptions(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricingCfg := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -103,9 +103,9 @@ func TestGetPricing_HasDescriptions(t *testing.T) {
 
 func TestGetPricing_CorrectPrices(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricingCfg := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -140,9 +140,9 @@ func TestGetPricing_CorrectPrices(t *testing.T) {
 
 func TestGetPricing_JSONContentType(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricingCfg := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -165,9 +165,9 @@ func TestGetPricing_JSONContentType(t *testing.T) {
 
 func TestGetPricing_AllRoutesHaveMethod(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricingCfg := &config.PricingConfig{
 		ScanContent: 0.001,

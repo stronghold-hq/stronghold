@@ -54,19 +54,21 @@ through Stronghold's scanning service. Intended for isolated machines only.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nonInteractive, _ := cmd.Flags().GetBool("yes")
 			privateKey, _ := cmd.Flags().GetString("private-key")
+			solanaPrivateKey, _ := cmd.Flags().GetString("solana-private-key")
 			accountNumber, _ := cmd.Flags().GetString("account-number")
-			if !nonInteractive && (privateKey != "" || accountNumber != "") {
-				fmt.Println(cli.WarningStyle.Render("Warning:"), "--private-key and --account-number require --yes flag")
+			if !nonInteractive && (privateKey != "" || solanaPrivateKey != "" || accountNumber != "") {
+				fmt.Println(cli.WarningStyle.Render("Warning:"), "--private-key, --solana-private-key, and --account-number require --yes flag")
 				fmt.Println("Running interactive mode instead. Use --yes for non-interactive.")
 			}
 			if nonInteractive {
-				return cli.RunInstallNonInteractive(privateKey, accountNumber)
+				return cli.RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber)
 			}
-			return cli.RunInstall()
+			return cli.RunInit()
 		},
 	}
 	initCmd.Flags().BoolP("yes", "y", false, "Non-interactive mode (skips prompts, uses defaults)")
-	initCmd.Flags().String("private-key", "", "Import wallet from private key (hex) - requires --yes")
+	initCmd.Flags().String("private-key", "", "Import EVM wallet from private key (hex) - requires --yes")
+	initCmd.Flags().String("solana-private-key", "", "Import Solana wallet from private key (base58) - requires --yes")
 	initCmd.Flags().String("account-number", "", "Login to existing account - requires --yes")
 
 	// Enable command
@@ -242,7 +244,9 @@ Available scanning keys:
 
 You can deposit via:
   - Dashboard: Use Stripe, Coinbase Pay, or Moonpay (recommended)
-  - Direct: Send USDC directly to your account address`,
+  - Direct: Send USDC on Base (EVM) or Solana to your wallet address
+
+Both Base and Solana deposit addresses are shown if configured.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cli.AccountDeposit()
 		},
@@ -253,16 +257,19 @@ You can deposit via:
 	// Wallet command
 	walletCmd := &cobra.Command{
 		Use:   "wallet",
-		Short: "Manage your Stronghold wallet",
+		Short: "Manage your Stronghold wallets (Base and Solana)",
 	}
 
 	walletExportCmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export wallet private key to a file",
-		Long: `Export your wallet private key to a file for backup.
+		Short: "Export wallet private keys to files",
+		Long: `Export your wallet private keys to files for backup.
 
-By default, exports to ~/.stronghold/wallet-backup
-Use --output to specify a different location.`,
+Exports both Base (EVM) and Solana wallet keys if both exist.
+  - Base key:   ~/.stronghold/wallet-backup (or --output path)
+  - Solana key: ~/.stronghold/wallet-backup-solana (or --output path with -solana suffix)
+
+Use --output to specify a different base location.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output, _ := cmd.Flags().GetString("output")
 			return cli.ExportWallet(output)
@@ -275,27 +282,36 @@ Use --output to specify a different location.`,
 		Short: "Replace wallet with a new private key",
 		Long: `Replace your current wallet with a new one.
 
+Use --chain to specify which wallet to replace:
+  --chain base    Replace the Base (EVM) wallet (default)
+  --chain solana  Replace the Solana wallet
+
 Reads the private key from (in order of precedence):
   1. stdin (if piped)
-  2. STRONGHOLD_PRIVATE_KEY environment variable
+  2. Environment variable (STRONGHOLD_PRIVATE_KEY for EVM, STRONGHOLD_SOLANA_PRIVATE_KEY for Solana)
   3. --file flag
   4. Interactive prompt (if terminal)
 
-If you run this interactively, you'll be asked whether to upload the private key
-to the server for multi-device setup (requires TOTP). Selecting "no" keeps your
-wallet local-only.
+For EVM wallets, you'll be asked whether to upload the key to the server
+for multi-device setup (requires TOTP). Server upload is not supported for
+Solana wallets.
 
 Example:
   echo $KEY | stronghold wallet replace --yes
+  echo $SOL_KEY | stronghold wallet replace --chain solana --yes
   STRONGHOLD_PRIVATE_KEY=xxx stronghold wallet replace --yes
+  STRONGHOLD_SOLANA_PRIVATE_KEY=xxx stronghold wallet replace --chain solana --yes
   stronghold wallet replace --file /path/to/key.txt
+  stronghold wallet replace --chain solana --file /path/to/solana-key.txt
   stronghold wallet replace  # interactive prompt`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			chainFlag, _ := cmd.Flags().GetString("chain")
 			fileFlag, _ := cmd.Flags().GetString("file")
 			yesFlag, _ := cmd.Flags().GetBool("yes")
-			return cli.WalletReplace(fileFlag, yesFlag)
+			return cli.WalletReplace(chainFlag, fileFlag, yesFlag)
 		},
 	}
+	walletReplaceCmd.Flags().String("chain", "base", "Which chain wallet to replace (base or solana)")
 	walletReplaceCmd.Flags().StringP("file", "f", "", "Read private key from file")
 	walletReplaceCmd.Flags().BoolP("yes", "y", false, "Skip warnings and confirmations")
 

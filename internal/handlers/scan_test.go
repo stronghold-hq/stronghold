@@ -30,9 +30,9 @@ func (m *mockScanner) ScanContent(text, sourceURL, sourceType, contentType strin
 func TestScanContent_EmptyText(t *testing.T) {
 	// Set up middleware with dev mode (no wallet = no payment required)
 	x402cfg := &config.X402Config{
-		WalletAddress:  "", // Dev mode
+		EVMWalletAddress:  "", // Dev mode
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -91,7 +91,7 @@ func TestScanContent_EmptyText(t *testing.T) {
 
 func TestScanContent_Success(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress: "", // Dev mode
+		EVMWalletAddress: "", // Dev mode
 	}
 	pricing := &config.PricingConfig{}
 	x402 := middleware.NewX402Middleware(x402cfg, pricing)
@@ -154,7 +154,7 @@ func TestScanContent_Success(t *testing.T) {
 
 func TestScanOutput_EmptyText(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress: "", // Dev mode
+		EVMWalletAddress: "", // Dev mode
 	}
 	pricing := &config.PricingConfig{}
 	x402 := middleware.NewX402Middleware(x402cfg, pricing)
@@ -202,7 +202,7 @@ func TestScanOutput_EmptyText(t *testing.T) {
 
 func TestScan_InvalidJSON(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress: "", // Dev mode
+		EVMWalletAddress: "", // Dev mode
 	}
 	pricing := &config.PricingConfig{}
 	x402 := middleware.NewX402Middleware(x402cfg, pricing)
@@ -240,7 +240,7 @@ func TestScan_InvalidJSON(t *testing.T) {
 
 func TestScanContent_WithMetadata(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress: "", // Dev mode
+		EVMWalletAddress: "", // Dev mode
 	}
 	pricing := &config.PricingConfig{}
 	x402 := middleware.NewX402Middleware(x402cfg, pricing)
@@ -306,7 +306,7 @@ func TestScanContent_WithMetadata(t *testing.T) {
 
 func TestScan_RequestIDInErrorResponse(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress: "", // Dev mode
+		EVMWalletAddress: "", // Dev mode
 	}
 	pricing := &config.PricingConfig{}
 	x402 := middleware.NewX402Middleware(x402cfg, pricing)

@@ -70,7 +70,9 @@ go run ./cmd/cli doctor
 Required environment variables for local development (see `.env.example`):
 - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` - PostgreSQL connection
 - `JWT_SECRET` - Authentication token signing
-- `X402_WALLET_ADDRESS` - Payment receiving address (omit for dev mode without payments)
+- `X402_EVM_WALLET_ADDRESS` - EVM payment receiving address (omit all wallet addresses for dev mode)
+- `X402_SOLANA_WALLET_ADDRESS` - Solana payment receiving address
+- `X402_NETWORKS` - Supported payment networks (e.g. `base,solana`)
 
 ## CLI Development
 
@@ -79,6 +81,13 @@ Required environment variables for local development (see `.env.example`):
 - When CLI code has bugs (e.g., path resolution issues), fix the actual code rather than adding workarounds like symlinks or environment hacks
 - CLI must work correctly in all environments: local development, installed via release, and Docker containers
 - Always verify file/binary existence before returning paths - don't assume files exist based on directory structure alone
+
+**CRITICAL: When making ANY CLI UX changes, you MUST also update:**
+1. `web/public/llms.txt` - Summary documentation for LLMs
+2. `web/public/llms-full.txt` - Full reference documentation for LLMs
+3. CLI help text in `cmd/cli/main.go` - Cobra command descriptions and flag help
+
+This includes changes to commands, flags, output format, wallet management, account management, or any user-facing behavior. These three files must always stay in sync with the actual CLI implementation.
 
 ## Research Before Implementation - NO GUESSING
 
@@ -221,12 +230,93 @@ PostgreSQL 16 with auto-migrations in `internal/db/migrations/`. Tables: account
 
 ## Deployment
 
-- **API (Fly.io)**: `fly deploy` (configured in fly.toml)
+- **API (Fly.io)**: `fly deploy` from repo root (app: `stronghold-api`, configured in `fly.toml`)
+- **Facilitator (Fly.io)**: `fly deploy` from `facilitator/` directory (app: `stronghold-facilitator`, configured in `facilitator/fly.toml`)
 - **Frontend (Cloudflare Pages)**: Builds automatically on push to master - hosted at `stronghold-bhj.pages.dev`
 - **Docker Compose**: `docker-compose up -d` (local development only)
 - Caddy provides auto HTTPS with Let's Encrypt
 
 **IMPORTANT: Do NOT build frontend locally** (`bun run build`) unless debugging a remote build failure. Cloudflare Pages builds on push, so just commit and push frontend changes. Local builds are slow and unnecessary.
+
+### Fly.io Secrets Reference
+
+All secrets are set via `fly secrets set KEY=VALUE -a <app-name>`. Secrets are NOT stored in `fly.toml`.
+
+**`stronghold-api`** (API server):
+
+```bash
+# Database (Fly Postgres - attached via fly pg attach)
+fly secrets set DB_HOST=<fly-pg-hostname> -a stronghold-api
+fly secrets set DB_PORT=5432 -a stronghold-api
+fly secrets set DB_USER=stronghold -a stronghold-api
+fly secrets set DB_PASSWORD=<password> -a stronghold-api
+fly secrets set DB_NAME=stronghold -a stronghold-api
+fly secrets set DB_SSLMODE=require -a stronghold-api
+
+# Authentication
+fly secrets set JWT_SECRET=<min-32-char-secret> -a stronghold-api
+
+# x402 Payment Configuration
+fly secrets set X402_EVM_WALLET_ADDRESS=0x<your-base-usdc-address> -a stronghold-api
+fly secrets set X402_SOLANA_WALLET_ADDRESS=<your-solana-usdc-address> -a stronghold-api
+fly secrets set X402_NETWORKS=base,solana -a stronghold-api
+fly secrets set X402_FACILITATOR_URL=http://stronghold-facilitator.internal:8402 -a stronghold-api
+
+# Stripe (wallet top-up / fiat on-ramp)
+fly secrets set STRIPE_SECRET_KEY=sk_live_... -a stronghold-api
+fly secrets set STRIPE_WEBHOOK_SECRET=whsec_... -a stronghold-api
+fly secrets set STRIPE_PUBLISHABLE_KEY=pk_live_... -a stronghold-api
+
+# Dashboard CORS
+fly secrets set DASHBOARD_URL=https://stronghold.security -a stronghold-api
+fly secrets set DASHBOARD_ALLOWED_ORIGINS=https://stronghold.security -a stronghold-api
+
+# AWS KMS (wallet key encryption)
+fly secrets set KMS_REGION=us-east-1 -a stronghold-api
+fly secrets set KMS_KEY_ID=alias/stronghold-wallet-keys -a stronghold-api
+
+# Scanner (optional - defaults are fine for most deployments)
+# fly secrets set STRONGHOLD_LLM_PROVIDER=anthropic -a stronghold-api
+# fly secrets set STRONGHOLD_LLM_API_KEY=sk-ant-... -a stronghold-api
+```
+
+**`stronghold-facilitator`** (x402 payment settlement):
+
+```bash
+# EVM settlement wallet (must be funded with ETH on Base for gas)
+fly secrets set FACILITATOR_PRIVATE_KEY=0x<evm-private-key> -a stronghold-facilitator
+
+# Solana settlement wallet (must be funded with SOL for fees)
+fly secrets set FACILITATOR_SOLANA_PRIVATE_KEY=<base58-solana-private-key> -a stronghold-facilitator
+
+# RPC endpoints (use Alchemy, Helius, or similar)
+fly secrets set RPC_URL_BASE=https://base-mainnet.g.alchemy.com/v2/<key> -a stronghold-facilitator
+fly secrets set RPC_URL_SOLANA=https://mainnet.helius-rpc.com/?api-key=<key> -a stronghold-facilitator
+
+# Testnet RPCs (optional - only needed if X402_NETWORKS includes testnet networks)
+# fly secrets set RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/<key> -a stronghold-facilitator
+# fly secrets set RPC_URL_SOLANA_DEVNET=https://devnet.helius-rpc.com/?api-key=<key> -a stronghold-facilitator
+```
+
+**Deployment commands:**
+
+```bash
+# Deploy API
+fly deploy -a stronghold-api
+
+# Deploy facilitator
+cd facilitator && fly deploy -a stronghold-facilitator
+
+# Check secrets are set
+fly secrets list -a stronghold-api
+fly secrets list -a stronghold-facilitator
+
+# View logs
+fly logs -a stronghold-api
+fly logs -a stronghold-facilitator
+```
+
+**Internal networking:** The API connects to the facilitator via Fly's private network at `http://stronghold-facilitator.internal:8402`. Both apps must be in the same Fly organization.
 
 ## Releases
 

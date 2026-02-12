@@ -35,21 +35,33 @@ func TestGenerateNonce_Uniqueness(t *testing.T) {
 }
 
 func TestGetChainID(t *testing.T) {
-	testCases := []struct {
-		network  string
-		expected int
-	}{
-		{"base", 8453},
-		{"base-sepolia", 84532},
-		{"unknown", 8453}, // Defaults to base mainnet
-	}
+	t.Run("base", func(t *testing.T) {
+		id, err := getChainID("base")
+		require.NoError(t, err)
+		assert.Equal(t, 8453, id)
+	})
 
-	for _, tc := range testCases {
-		t.Run(tc.network, func(t *testing.T) {
-			result := getChainID(tc.network)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
+	t.Run("base-sepolia", func(t *testing.T) {
+		id, err := getChainID("base-sepolia")
+		require.NoError(t, err)
+		assert.Equal(t, 84532, id)
+	})
+
+	t.Run("solana returns error", func(t *testing.T) {
+		_, err := getChainID("solana")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported network")
+	})
+
+	t.Run("solana-devnet returns error", func(t *testing.T) {
+		_, err := getChainID("solana-devnet")
+		assert.Error(t, err)
+	})
+
+	t.Run("unknown returns error", func(t *testing.T) {
+		_, err := getChainID("unknown")
+		assert.Error(t, err)
+	})
 }
 
 func TestParseX402Payment_InvalidFormat(t *testing.T) {

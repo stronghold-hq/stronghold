@@ -15,6 +15,7 @@ type PricingHandler struct {
 type PricingResponse struct {
 	Currency string       `json:"currency"`
 	Network  string       `json:"network"`
+	Networks []string     `json:"networks"`
 	Routes   []RoutePrice `json:"routes"`
 }
 
@@ -69,6 +70,7 @@ func (h *PricingHandler) GetPricing(c fiber.Ctx) error {
 	return c.JSON(PricingResponse{
 		Currency: "USDC",
 		Network:  h.x402.GetNetwork(),
+		Networks: h.x402.GetNetworks(),
 		Routes:   routePrices,
 	})
 }

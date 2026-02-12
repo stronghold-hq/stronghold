@@ -43,15 +43,17 @@ type InstallModel struct {
 	confirmWarning bool
 
 	// Account step
-	accountChoice      int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
-	accountNumber      string
-	walletAddress      string
-	authToken          string
-	loggedIn           bool
-	importKeyInput     textinput.Model
-	loginInput         textinput.Model
-	awaitingKeyInput   bool
-	awaitingLoginInput bool
+	accountChoice            int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
+	accountNumber            string
+	walletAddress            string
+	authToken                string
+	loggedIn                 bool
+	importKeyInput           textinput.Model
+	importSolanaKeyInput     textinput.Model
+	loginInput               textinput.Model
+	awaitingKeyInput         bool
+	awaitingSolanaKeyInput   bool
+	awaitingLoginInput       bool
 
 	// Payment step
 	paymentMethod int // 0 = stripe, 1 = wallet
@@ -114,11 +116,18 @@ func NewInstallModel() *InstallModel {
 	apiInput.Width = APIInputWidth
 
 	importKeyInput := textinput.New()
-	importKeyInput.Placeholder = "Enter private key (hex)"
+	importKeyInput.Placeholder = "Enter EVM private key (hex)"
 	importKeyInput.CharLimit = PrivateKeyInputCharLimit
 	importKeyInput.Width = PrivateKeyInputWidth
 	importKeyInput.EchoMode = textinput.EchoPassword
 	importKeyInput.EchoCharacter = '*'
+
+	importSolanaKeyInput := textinput.New()
+	importSolanaKeyInput.Placeholder = "Enter Solana private key (base58) or press Enter to skip"
+	importSolanaKeyInput.CharLimit = SolanaPrivateKeyInputCharLimit
+	importSolanaKeyInput.Width = SolanaPrivateKeyInputWidth
+	importSolanaKeyInput.EchoMode = textinput.EchoPassword
+	importSolanaKeyInput.EchoCharacter = '*'
 
 	loginInput := textinput.New()
 	loginInput.Placeholder = "XXXX-XXXX-XXXX-XXXX"
@@ -126,15 +135,16 @@ func NewInstallModel() *InstallModel {
 	loginInput.Width = AccountNumberInputWidth
 
 	return &InstallModel{
-		state:          StateWarning,
-		config:         DefaultConfig(),
-		portInput:      portInput,
-		apiInput:       apiInput,
-		importKeyInput: importKeyInput,
-		loginInput:     loginInput,
-		configPort:     DefaultProxyPort,
-		configAPI:      DefaultAPIEndpoint,
-		progress:       []string{},
+		state:                StateWarning,
+		config:               DefaultConfig(),
+		portInput:            portInput,
+		apiInput:             apiInput,
+		importKeyInput:       importKeyInput,
+		importSolanaKeyInput: importSolanaKeyInput,
+		loginInput:           loginInput,
+		configPort:           DefaultProxyPort,
+		configAPI:            DefaultAPIEndpoint,
+		progress:             []string{},
 	}
 }
 
@@ -161,6 +171,12 @@ func (m *InstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.awaitingKeyInput = false
 				m.importKeyInput.SetValue("") // Clear sensitive data
 				m.importKeyInput.Blur()
+				return m, nil
+			}
+			if m.state == StateAccount && m.awaitingSolanaKeyInput {
+				m.awaitingSolanaKeyInput = false
+				m.importSolanaKeyInput.SetValue("")
+				m.importSolanaKeyInput.Blur()
 				return m, nil
 			}
 			if m.state == StateAccount && m.awaitingLoginInput {
@@ -203,6 +219,8 @@ func (m *InstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StateAccount:
 		if m.awaitingKeyInput {
 			m.importKeyInput, cmd = m.importKeyInput.Update(msg)
+		} else if m.awaitingSolanaKeyInput {
+			m.importSolanaKeyInput, cmd = m.importSolanaKeyInput.Update(msg)
 		} else if m.awaitingLoginInput {
 			m.loginInput, cmd = m.loginInput.Update(msg)
 		}
@@ -249,18 +267,18 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case StateAccount:
-		// Handle key input submission
+		// Handle EVM key input submission
 		if m.awaitingKeyInput {
 			privateKey := m.importKeyInput.Value()
 			if privateKey == "" {
 				return m, nil
 			}
-			// Import the provided private key
+			// Import the provided EVM private key
 			userID := generateUserID()
 			m.config.Auth.UserID = userID
 			address, err := ImportWallet(userID, DefaultBlockchain, privateKey)
 			if err != nil {
-				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Invalid private key: %v", err)))
+				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Invalid EVM private key: %v", err)))
 				m.importKeyInput.SetValue("") // Clear invalid key
 				m.awaitingKeyInput = false
 				return m, nil
@@ -268,9 +286,46 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.config.Wallet.Address = address
 			m.config.Wallet.Network = DefaultBlockchain
 			m.walletAddress = address
-			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Wallet imported: %s", address)))
+			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ EVM wallet imported: %s", address)))
 
-			// Create account via API with this wallet
+			// Now prompt for Solana key
+			m.awaitingKeyInput = false
+			m.awaitingSolanaKeyInput = true
+			m.importSolanaKeyInput.Focus()
+			return m, nil
+		}
+
+		// Handle Solana key input submission
+		if m.awaitingSolanaKeyInput {
+			solanaKey := m.importSolanaKeyInput.Value()
+			userID := m.config.Auth.UserID
+
+			if solanaKey != "" {
+				// Import the provided Solana private key
+				solanaAddr, err := ImportSolanaWallet(userID, DefaultSolanaNetwork, solanaKey)
+				if err != nil {
+					m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Invalid Solana private key: %v", err)))
+					m.importSolanaKeyInput.SetValue("")
+					m.awaitingSolanaKeyInput = false
+					return m, nil
+				}
+				m.config.Wallet.SolanaAddress = solanaAddr
+				m.config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+				m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Solana wallet imported: %s", solanaAddr)))
+			} else {
+				// No Solana key provided, create a new one
+				solanaAddr, solanaErr := SetupSolanaWallet(userID, DefaultSolanaNetwork)
+				if solanaErr != nil {
+					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Solana wallet setup failed: %v", solanaErr)))
+				} else {
+					m.config.Wallet.SolanaAddress = solanaAddr
+					m.config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+					m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Solana wallet created: %s", solanaAddr)))
+				}
+			}
+
+			// Create account via API with the EVM wallet
+			address := m.config.Wallet.Address
 			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
 			resp, err := apiClient.CreateAccount(&CreateAccountRequest{WalletAddress: &address})
 			if err != nil {
@@ -283,7 +338,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.config.Auth.AccountNumber = m.accountNumber
 			m.config.Auth.LoggedIn = true
 			m.loggedIn = true
-			m.awaitingKeyInput = false
+			m.awaitingSolanaKeyInput = false
 			m.state = StatePayment
 			return m, nil
 		}
@@ -361,13 +416,23 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				}
 				address, err := SetupWallet(userID, "base")
 				if err != nil {
-					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet setup failed: %v", err)))
+					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ EVM wallet setup failed: %v", err)))
 				} else {
 					walletAddress = address
 					m.config.Wallet.Address = address
 					m.config.Wallet.Network = DefaultBlockchain
 					m.walletAddress = address
-					m.progress = append(m.progress, successStyle.Render("✓ Wallet created locally"))
+					m.progress = append(m.progress, successStyle.Render("✓ EVM wallet created locally"))
+				}
+
+				// Also create Solana wallet
+				solanaAddr, solanaErr := SetupSolanaWallet(userID, DefaultSolanaNetwork)
+				if solanaErr != nil {
+					m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Solana wallet setup failed: %v", solanaErr)))
+				} else {
+					m.config.Wallet.SolanaAddress = solanaAddr
+					m.config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+					m.progress = append(m.progress, successStyle.Render("✓ Solana wallet created locally"))
 				}
 			}
 
@@ -446,7 +511,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 func (m *InstallModel) handleUp() {
 	switch m.state {
 	case StateAccount:
-		if !m.awaitingKeyInput && !m.awaitingLoginInput && m.accountChoice > 0 {
+		if !m.awaitingKeyInput && !m.awaitingSolanaKeyInput && !m.awaitingLoginInput && m.accountChoice > 0 {
 			m.accountChoice--
 		}
 	case StatePayment:
@@ -460,7 +525,7 @@ func (m *InstallModel) handleUp() {
 func (m *InstallModel) handleDown() {
 	switch m.state {
 	case StateAccount:
-		if !m.awaitingKeyInput && !m.awaitingLoginInput && m.accountChoice < MaxAccountChoices-1 {
+		if !m.awaitingKeyInput && !m.awaitingSolanaKeyInput && !m.awaitingLoginInput && m.accountChoice < MaxAccountChoices-1 {
 			m.accountChoice++
 		}
 	case StatePayment:
@@ -527,12 +592,25 @@ func (m *InstallModel) viewAccount() string {
 	b.WriteString(headerStyle.Render("Account Setup"))
 	b.WriteString("\n\n")
 
-	// Show key input if awaiting
+	// Show EVM key input if awaiting
 	if m.awaitingKeyInput {
-		b.WriteString("Enter your private key (hex):\n")
+		b.WriteString("Enter your Base (EVM) private key (hex):\n")
 		b.WriteString(m.importKeyInput.View())
 		b.WriteString("\n\n")
 		b.WriteString(infoStyle.Render("Press Enter to continue, Esc to go back"))
+		return b.String()
+	}
+
+	// Show Solana key input if awaiting
+	if m.awaitingSolanaKeyInput {
+		for _, step := range m.progress {
+			b.WriteString(step)
+			b.WriteString("\n")
+		}
+		b.WriteString("\nEnter your Solana private key (base58), or press Enter to generate a new one:\n")
+		b.WriteString(m.importSolanaKeyInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(infoStyle.Render("Press Enter to continue (empty = generate new), Esc to go back"))
 		return b.String()
 	}
 
@@ -654,14 +732,20 @@ func (m *InstallModel) viewComplete() string {
 	b.WriteString("attacks before reaching your agents.\n\n")
 	b.WriteString("This cannot be bypassed by applications.\n\n")
 
-	if m.config.Wallet.Address != "" {
+	if m.config.Wallet.Address != "" || m.config.Wallet.SolanaAddress != "" {
 		b.WriteString(headerStyle.Render("Your Account:"))
 		b.WriteString("\n")
 		if m.accountNumber != "" {
 			b.WriteString(fmt.Sprintf("Account Number: %s\n", m.accountNumber))
 		}
-		b.WriteString(fmt.Sprintf("Wallet Address: %s\n\n", m.config.Wallet.Address))
-		b.WriteString(infoStyle.Render("Fund with USDC on Base to start scanning.\n"))
+		if m.config.Wallet.Address != "" {
+			b.WriteString(fmt.Sprintf("Base Wallet:    %s\n", m.config.Wallet.Address))
+		}
+		if m.config.Wallet.SolanaAddress != "" {
+			b.WriteString(fmt.Sprintf("Solana Wallet:  %s\n", m.config.Wallet.SolanaAddress))
+		}
+		b.WriteString("\n")
+		b.WriteString(infoStyle.Render("Fund with USDC on Base or Solana to start scanning.\n"))
 		b.WriteString(infoStyle.Render("Use: stronghold account deposit\n"))
 		b.WriteString(infoStyle.Render("Or visit: https://dashboard.stronghold.security\n\n"))
 	}
@@ -988,18 +1072,19 @@ func (m *InstallModel) enableTransparentProxy() error {
 	return tp.Enable()
 }
 
-// RunInstall runs the interactive installer
-func RunInstall() error {
+// RunInit runs the interactive init setup
+func RunInit() error {
 	model := NewInstallModel()
 	p := tea.NewProgram(model)
 	_, err := p.Run()
 	return err
 }
 
-// RunInstallNonInteractive runs a non-interactive installation
-// privateKey: optional hex private key to import (for pre-funded wallets)
+// RunInitNonInteractive runs a non-interactive init setup
+// privateKey: optional hex private key to import for EVM wallet (for pre-funded wallets)
+// solanaPrivateKey: optional base58 private key to import for Solana wallet
 // accountNumber: optional account number to login to existing account
-func RunInstallNonInteractive(privateKey, accountNumber string) error {
+func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) error {
 	config := DefaultConfig()
 
 	// Check platform
@@ -1066,30 +1151,46 @@ func RunInstallNonInteractive(privateKey, accountNumber string) error {
 		fmt.Println("→ Creating account...")
 		req := &CreateAccountRequest{}
 
-		// Create a local wallet first if no private key is provided
-		if privateKey == "" {
-			walletAddress, err := SetupWallet(userID, "base")
-			if err != nil {
-				fmt.Printf("⚠ Wallet setup failed: %v\n", err)
-			} else {
-				config.Wallet.Address = walletAddress
-				config.Wallet.Network = DefaultBlockchain
-				req.WalletAddress = &walletAddress
-				fmt.Printf("✓ Wallet created: %s\n", walletAddress)
-			}
-		}
-
-		// If private key provided, we'll set up wallet locally and pass address to API
+		// EVM wallet: import existing key or create new
 		if privateKey != "" {
-			// Validate and import the private key locally first
 			address, err := ImportWallet(userID, DefaultBlockchain, privateKey)
 			if err != nil {
-				return fmt.Errorf("failed to import private key: %w", err)
+				return fmt.Errorf("failed to import EVM private key: %w", err)
 			}
 			config.Wallet.Address = address
 			config.Wallet.Network = DefaultBlockchain
 			req.WalletAddress = &address
-			fmt.Printf("✓ Wallet imported: %s\n", address)
+			fmt.Printf("✓ EVM wallet imported: %s\n", address)
+		} else {
+			walletAddress, err := SetupWallet(userID, "base")
+			if err != nil {
+				fmt.Printf("⚠ EVM wallet setup failed: %v\n", err)
+			} else {
+				config.Wallet.Address = walletAddress
+				config.Wallet.Network = DefaultBlockchain
+				req.WalletAddress = &walletAddress
+				fmt.Printf("✓ EVM wallet created: %s\n", walletAddress)
+			}
+		}
+
+		// Solana wallet: import existing key or create new
+		if solanaPrivateKey != "" {
+			solanaAddr, err := ImportSolanaWallet(userID, DefaultSolanaNetwork, solanaPrivateKey)
+			if err != nil {
+				return fmt.Errorf("failed to import Solana private key: %w", err)
+			}
+			config.Wallet.SolanaAddress = solanaAddr
+			config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+			fmt.Printf("✓ Solana wallet imported: %s\n", solanaAddr)
+		} else {
+			solanaAddr, solanaErr := SetupSolanaWallet(userID, DefaultSolanaNetwork)
+			if solanaErr != nil {
+				fmt.Printf("⚠ Solana wallet setup failed: %v\n", solanaErr)
+			} else {
+				config.Wallet.SolanaAddress = solanaAddr
+				config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+				fmt.Printf("✓ Solana wallet created: %s\n", solanaAddr)
+			}
 		}
 
 		resp, err := apiClient.CreateAccount(req)

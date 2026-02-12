@@ -122,21 +122,67 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 
 ### CLI Commands Reference
 
-| Command                    | Description                              | Sudo |
-|----------------------------|------------------------------------------|------|
-| stronghold doctor          | Check system prerequisites               | No   |
-| stronghold init            | Interactive installation                 | Yes  |
-| stronghold enable          | Start proxy, enable traffic interception | Yes  |
-| stronghold disable         | Stop proxy, restore direct access        | Yes  |
-| stronghold status          | Show proxy status and statistics         | No   |
-| stronghold logs            | View proxy logs                          | No   |
-| stronghold account balance | Check account balance                    | No   |
-| stronghold account deposit | Show deposit options                     | No   |
-| stronghold wallet export   | Export private key for backup            | No   |
-| stronghold wallet replace  | Replace wallet with a new private key    | No   |
-| stronghold config get      | Get configuration value                  | No   |
-| stronghold config set      | Set configuration value                  | No   |
-| stronghold uninstall       | Remove Stronghold from system            | Yes  |
+| Command                    | Description                                           | Sudo |
+|----------------------------|-------------------------------------------------------|------|
+| stronghold doctor          | Check system prerequisites                            | No   |
+| stronghold init            | Interactive setup                                     | Yes  |
+| stronghold init --yes      | Non-interactive setup with defaults                   | Yes  |
+| stronghold enable          | Start proxy, enable traffic interception              | Yes  |
+| stronghold disable         | Stop proxy, restore direct access                     | Yes  |
+| stronghold status          | Show proxy status and statistics                      | No   |
+| stronghold logs            | View proxy logs                                       | No   |
+| stronghold account balance | Check balance (Base and Solana wallets)               | No   |
+| stronghold account deposit | Show deposit addresses (Base and Solana)              | No   |
+| stronghold wallet export   | Export private keys for backup (both chains)          | No   |
+| stronghold wallet replace  | Replace wallet (use --chain base or --chain solana)   | No   |
+| stronghold config get      | Get configuration value                               | No   |
+| stronghold config set      | Set configuration value                               | No   |
+| stronghold uninstall       | Remove Stronghold from system                         | Yes  |
+
+### Wallet Import During Init
+
+Import existing wallets during non-interactive setup:
+
+```bash
+# Import both EVM and Solana wallets
+stronghold init --yes --private-key 0x<evm-hex-key> --solana-private-key <base58-solana-key>
+
+# Import only EVM wallet (Solana wallet auto-generated)
+stronghold init --yes --private-key 0x<evm-hex-key>
+
+# Import only Solana wallet (EVM wallet auto-generated)
+stronghold init --yes --solana-private-key <base58-solana-key>
+
+# Login to existing account
+stronghold init --yes --account-number XXXX-XXXX-XXXX-XXXX
+```
+
+Key format differences:
+- **EVM (Base)**: Hex string, 64 chars, optional 0x prefix (e.g., `0xabcdef...`)
+- **Solana**: Base58 string, ~87-88 chars (e.g., `5K1gE...`)
+
+During interactive setup, you'll be prompted for each key separately. Press Enter to skip and auto-generate.
+
+### Wallet Replace
+
+Replace an existing wallet with a new private key:
+
+```bash
+# Replace Base (EVM) wallet (default)
+stronghold wallet replace
+stronghold wallet replace --chain base
+
+# Replace Solana wallet
+stronghold wallet replace --chain solana
+
+# Non-interactive from env var
+STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace --yes
+STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace --chain solana --yes
+
+# From file
+stronghold wallet replace --file /path/to/evm-key.txt
+stronghold wallet replace --chain solana --file /path/to/solana-key.txt
+```
 
 ### Config Command Usage
 
@@ -518,10 +564,15 @@ if (scanResult.decision === "BLOCK") {
 
 ### Payment Networks
 
-| Network       | Token | Use Case     |
-|---------------|-------|--------------|
-| base          | USDC  | Production   |
-| base-sepolia  | USDC  | Testing      |
+| Network       | Token | Chain   | Use Case             |
+|---------------|-------|---------|----------------------|
+| base          | USDC  | EVM     | Production (Base)    |
+| base-sepolia  | USDC  | EVM     | Testing (Base)       |
+| solana        | USDC  | Solana  | Production (Solana)  |
+| solana-devnet | USDC  | Solana  | Testing (Solana)     |
+
+Stronghold accepts payments on both Base (EVM) and Solana networks.
+Clients can choose their preferred chain when making payments.
 
 ---
 
@@ -549,11 +600,17 @@ Service/KWallet/pass). Server-side wallet storage is optional.
 stronghold account balance
 ```
 
-Output:
+Shows balances for all configured wallets:
 ```
-Account: 0x1234...5678
-Balance: 4.50 USDC
-Status: Active
+💳 Account
+
+Base (EVM) Wallet:
+  0x1234...5678
+  Balance: 4.500000 USDC
+
+Solana Wallet:
+  ABC123...XYZ
+  Balance: 2.000000 USDC
 ```
 
 ### Adding Funds
@@ -562,9 +619,10 @@ Status: Active
 stronghold account deposit
 ```
 
-Options:
+Shows deposit addresses for both chains:
 - **Dashboard**: Stripe, Coinbase Pay, or Moonpay (recommended)
-- **Direct**: Send USDC on Base to your account address
+- **Direct Base**: Send USDC on Base to your EVM wallet address
+- **Direct Solana**: Send USDC on Solana to your Solana wallet address
 
 ### Low Balance Warnings
 
@@ -592,11 +650,12 @@ The proxy shows warnings when balance drops below 1 USDC.
 
 ### API Server Environment Variables
 
-| Variable                    | Required | Default      | Description                    |
-|-----------------------------|----------|--------------|--------------------------------|
-| PORT                        | No       | 8080         | HTTP server port               |
-| X402_WALLET_ADDRESS         | Yes*     | -            | USDC receiving address         |
-| X402_NETWORK                | No       | base         | base or base-sepolia           |
+| Variable                    | Required | Default      | Description                        |
+|-----------------------------|----------|--------------|------------------------------------|
+| PORT                        | No       | 8080         | HTTP server port                   |
+| X402_EVM_WALLET_ADDRESS     | Yes*     | -            | EVM USDC receiving address (Base)  |
+| X402_SOLANA_WALLET_ADDRESS  | No       | -            | Solana USDC receiving address      |
+| X402_NETWORKS               | No       | base         | Supported networks (comma-sep)     |
 | STRONGHOLD_BLOCK_THRESHOLD  | No       | 0.55         | Score threshold for BLOCK      |
 | STRONGHOLD_WARN_THRESHOLD   | No       | 0.35         | Score threshold for WARN       |
 | STRONGHOLD_ENABLE_HUGOT     | No       | true         | Enable ML classification       |
@@ -605,7 +664,7 @@ The proxy shows warnings when balance drops below 1 USDC.
 | STRONGHOLD_LLM_PROVIDER     | No       | -            | LLM provider (groq, openai)    |
 | STRONGHOLD_LLM_API_KEY      | No       | -            | API key for LLM layer          |
 
-*If X402_WALLET_ADDRESS is not set, server runs in development mode
+*If no wallet addresses are set, server runs in development mode
 without payment requirements.
 
 ### x402 Facilitator Environment Variables
@@ -613,14 +672,18 @@ without payment requirements.
 The facilitator settles x402 payments on-chain. It runs as a separate
 service alongside the API (docker-compose handles this automatically).
 
-| Variable                    | Required | Default      | Description                    |
-|-----------------------------|----------|--------------|--------------------------------|
-| FACILITATOR_PRIVATE_KEY     | Yes      | -            | Settlement wallet private key  |
-| RPC_URL_BASE                | Yes      | -            | Base mainnet RPC endpoint      |
-| RPC_URL_BASE_SEPOLIA        | No       | -            | Base Sepolia RPC (testnet)     |
+| Variable                       | Required | Default      | Description                       |
+|--------------------------------|----------|--------------|-----------------------------------|
+| FACILITATOR_PRIVATE_KEY        | Yes      | -            | EVM settlement wallet private key |
+| FACILITATOR_SOLANA_PRIVATE_KEY | No       | -            | Solana settlement wallet key      |
+| RPC_URL_BASE                   | Yes      | -            | Base mainnet RPC endpoint         |
+| RPC_URL_BASE_SEPOLIA           | No       | -            | Base Sepolia RPC (testnet)        |
+| RPC_URL_SOLANA                 | No       | mainnet RPC  | Solana mainnet RPC endpoint       |
+| RPC_URL_SOLANA_DEVNET          | No       | devnet RPC   | Solana devnet RPC endpoint        |
 
-The facilitator wallet needs a small ETH balance on Base for gas
-(~0.01 ETH lasts ~90,000 settlements).
+The EVM facilitator wallet needs a small ETH balance on Base for gas
+(~0.01 ETH lasts ~90,000 settlements). The Solana facilitator wallet
+needs a small SOL balance for transaction fees.
 
 ### Scoring Layers
 

@@ -50,9 +50,9 @@ func TestDefaultWorkerConfig(t *testing.T) {
 
 func TestNewWorker(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
-		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		EVMWalletAddress: "0x1234567890123456789012345678901234567890",
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
 	}
 
 	t.Run("with default config", func(t *testing.T) {
@@ -79,9 +79,9 @@ func TestNewWorker(t *testing.T) {
 
 func TestWorker_GracefulShutdown(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
-		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		EVMWalletAddress: "0x1234567890123456789012345678901234567890",
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
 	}
 
 	cfg := &WorkerConfig{
@@ -119,9 +119,9 @@ func TestWorker_GracefulShutdown(t *testing.T) {
 
 func TestWorker_ContextCancellation(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
-		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		EVMWalletAddress: "0x1234567890123456789012345678901234567890",
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
 	}
 
 	cfg := &WorkerConfig{
@@ -205,9 +205,9 @@ func TestWorker_BackoffTiming(t *testing.T) {
 
 func TestWorker_HttpClientTimeout(t *testing.T) {
 	x402cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
-		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		EVMWalletAddress: "0x1234567890123456789012345678901234567890",
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
 	}
 
 	worker := NewWorker(nil, x402cfg, nil)

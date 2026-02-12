@@ -27,8 +27,11 @@ services:
       - "127.0.0.1:8402:8402"
     environment:
       - FACILITATOR_PRIVATE_KEY=${FACILITATOR_PRIVATE_KEY:-}
+      - FACILITATOR_SOLANA_PRIVATE_KEY=${FACILITATOR_SOLANA_PRIVATE_KEY:-}
       - RPC_URL_BASE=${RPC_URL_BASE:-https://mainnet.base.org}
       - RPC_URL_BASE_SEPOLIA=${RPC_URL_BASE_SEPOLIA:-https://sepolia.base.org}
+      - RPC_URL_SOLANA=${RPC_URL_SOLANA:-https://api.mainnet-beta.solana.com}
+      - RPC_URL_SOLANA_DEVNET=${RPC_URL_SOLANA_DEVNET:-https://api.devnet.solana.com}
       - RUST_LOG=${RUST_LOG:-info}
     restart: unless-stopped
     healthcheck:
@@ -61,9 +64,10 @@ services:
       - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3000}
       - DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000}
       # x402
-      - X402_WALLET_ADDRESS=${X402_WALLET_ADDRESS}
+      - X402_EVM_WALLET_ADDRESS=${X402_EVM_WALLET_ADDRESS}
+      - X402_SOLANA_WALLET_ADDRESS=${X402_SOLANA_WALLET_ADDRESS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-http://x402-facilitator:8402}
-      - X402_NETWORK=${X402_NETWORK:-base}
+      - X402_NETWORKS=${X402_NETWORKS:-base,solana}
       # Stronghold
       - STRONGHOLD_BLOCK_THRESHOLD=${STRONGHOLD_BLOCK_THRESHOLD:-0.55}
       - STRONGHOLD_WARN_THRESHOLD=${STRONGHOLD_WARN_THRESHOLD:-0.35}

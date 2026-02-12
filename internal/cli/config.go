@@ -37,8 +37,10 @@ type AuthConfig struct {
 
 // WalletConfig holds wallet configuration
 type WalletConfig struct {
-	Address string `yaml:"address"`
-	Network string `yaml:"network"`
+	Address       string `yaml:"address"`
+	Network       string `yaml:"network"`
+	SolanaAddress string `yaml:"solana_address,omitempty"`
+	SolanaNetwork string `yaml:"solana_network,omitempty"`
 }
 
 // PaymentsConfig holds payment configuration
@@ -120,7 +122,8 @@ func DefaultConfig() *CLIConfig {
 			LoggedIn: false,
 		},
 		Wallet: WalletConfig{
-			Network: "base",
+			Network:       "base",
+			SolanaNetwork: DefaultSolanaNetwork,
 		},
 		Payments: PaymentsConfig{
 			Method:         "stripe",

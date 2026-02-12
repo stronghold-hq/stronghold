@@ -59,10 +59,11 @@ type X402Wallet interface {
 
 // ScannerClient is a client for the Stronghold scanning API
 type ScannerClient struct {
-	baseURL       string
-	token         string
-	httpClient    *http.Client
-	wallet        X402Wallet
+	baseURL        string
+	token          string
+	httpClient     *http.Client
+	wallet         X402Wallet // EVM wallet (Base)
+	solanaWallet   X402Wallet // Solana wallet
 	facilitatorURL string
 }
 
@@ -86,9 +87,14 @@ func NewScannerClient(baseURL, token string) *ScannerClient {
 	}
 }
 
-// SetWallet sets the wallet for x402 payments
+// SetWallet sets the EVM wallet for x402 payments
 func (c *ScannerClient) SetWallet(w X402Wallet) {
 	c.wallet = w
+}
+
+// SetSolanaWallet sets the Solana wallet for x402 payments
+func (c *ScannerClient) SetSolanaWallet(w X402Wallet) {
+	c.solanaWallet = w
 }
 
 // ScanContent scans external content for prompt injection attacks
@@ -118,13 +124,18 @@ func (c *ScannerClient) scanWithPayment(ctx context.Context, endpoint string, re
 		return nil, fmt.Errorf("payment required but no requirements received")
 	}
 
-	// Check if we have a wallet
-	if c.wallet == nil {
-		return nil, fmt.Errorf("payment required but no wallet configured. Run 'stronghold wallet show' to check your balance or visit https://getstronghold.xyz/dashboard to add funds")
+	// Select wallet based on network
+	selectedWallet := c.wallet
+	if wallet.IsSolanaNetwork(paymentReq.Network) {
+		selectedWallet = c.solanaWallet
+	}
+
+	if selectedWallet == nil {
+		return nil, fmt.Errorf("payment required but no wallet configured for network %s. Run 'stronghold wallet show' to check your balance or visit https://getstronghold.xyz/dashboard to add funds", paymentReq.Network)
 	}
 
 	// Create x402 payment
-	paymentHeader, err := c.wallet.CreateX402Payment(paymentReq)
+	paymentHeader, err := selectedWallet.CreateX402Payment(paymentReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment: %w", err)
 	}

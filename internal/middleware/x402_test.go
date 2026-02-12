@@ -44,9 +44,9 @@ func createRawPaymentHeader(payer, receiver, amount, network, nonce, signature s
 func TestAtomicPayment_DevModeBypass(t *testing.T) {
 	// No wallet address = dev mode
 	cfg := &config.X402Config{
-		WalletAddress:  "", // Empty = dev mode
+		EVMWalletAddress:  "", // Empty = dev mode
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent:  0.001,
@@ -73,9 +73,9 @@ func TestAtomicPayment_DevModeBypass(t *testing.T) {
 
 func TestAtomicPayment_MissingHeader(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -114,9 +114,9 @@ func TestAtomicPayment_MissingHeader(t *testing.T) {
 
 func TestRequirePayment_DevModeBypass(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "", // Dev mode
+		EVMWalletAddress:  "", // Dev mode
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -139,9 +139,9 @@ func TestRequirePayment_DevModeBypass(t *testing.T) {
 
 func TestIsFreeRoute(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{}
 
@@ -170,9 +170,9 @@ func TestIsFreeRoute(t *testing.T) {
 
 func TestGetRoutes(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -248,9 +248,9 @@ func TestAtomicPayment_WithDB_IdempotencyCache(t *testing.T) {
 	receiverAddress := "0x1234567890123456789012345678901234567890"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -324,9 +324,9 @@ func TestAtomicPayment_DuplicateInProgress(t *testing.T) {
 	receiverAddress := "0x1234567890123456789012345678901234567890"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -409,9 +409,9 @@ func TestAtomicPayment_SettlementFailure(t *testing.T) {
 	receiverAddress := "0x1234567890123456789012345678901234567890"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -476,9 +476,9 @@ func TestAtomicPayment_HandlerError(t *testing.T) {
 	receiverAddress := "0x1234567890123456789012345678901234567890"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -530,9 +530,9 @@ func TestAtomicPayment_HandlerError(t *testing.T) {
 
 func TestMiddleware_SkipsFreeRoutes(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -566,9 +566,9 @@ func TestMiddleware_SkipsFreeRoutes(t *testing.T) {
 
 func TestPaymentResponse(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{}
 
@@ -599,9 +599,9 @@ func TestPaymentResponse(t *testing.T) {
 
 func TestPaymentResponse_DevMode(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "", // Dev mode
+		EVMWalletAddress:  "", // Dev mode
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{}
 
@@ -648,9 +648,9 @@ func TestNewX402MiddlewareWithDB(t *testing.T) {
 	defer testDB.Close(t)
 
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -674,9 +674,9 @@ func TestAtomicPayment_FullFlow_Integration(t *testing.T) {
 	receiverAddress := "0x1234567890123456789012345678901234567890"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -759,9 +759,9 @@ func TestAtomicPayment_InvalidAmountFormat(t *testing.T) {
 	payerAddress := "0xabcdef1234567890abcdef1234567890abcdef12"
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverAddress,
+		EVMWalletAddress:  receiverAddress,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -815,9 +815,9 @@ func TestVerifyPayment_AddressNormalization(t *testing.T) {
 	// Checksum version would be: 0x1234567890AbcdEF1234567890aBcDeF12345678
 
 	cfg := &config.X402Config{
-		WalletAddress:  receiverLower,
+		EVMWalletAddress:  receiverLower,
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{
 		ScanContent: 0.001,
@@ -865,9 +865,9 @@ func TestVerifyPayment_AddressNormalization(t *testing.T) {
 
 func TestHttpClientTimeout(t *testing.T) {
 	cfg := &config.X402Config{
-		WalletAddress:  "0x1234567890123456789012345678901234567890",
+		EVMWalletAddress:  "0x1234567890123456789012345678901234567890",
 		FacilitatorURL: "https://x402.org/facilitator",
-		Network:        "base-sepolia",
+		Networks:       []string{"base-sepolia"},
 	}
 	pricing := &config.PricingConfig{}
 

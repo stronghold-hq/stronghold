@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,6 +16,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
+
+// timeNow is a variable for testing (allows mocking time)
+var timeNow = time.Now
 
 // PaymentPayloadV2 represents the x402 v2 payment payload sent to facilitator
 type PaymentPayloadV2 struct {
@@ -44,28 +48,30 @@ type EIP3009Authorization struct {
 	Nonce       string `json:"nonce"`
 }
 
-// X402Payload represents our internal payment payload (for backward compat)
+// X402Payload represents our internal payment payload
 type X402Payload struct {
-	Network         string `json:"network"`
-	Scheme          string `json:"scheme"`
-	Payer           string `json:"payer"`
-	Receiver        string `json:"receiver"`
-	TokenAddress    string `json:"tokenAddress"`
-	Amount          string `json:"amount"`
-	Timestamp       int64  `json:"timestamp"`
-	Nonce           string `json:"nonce"`
-	Signature       string `json:"signature"` // hex encoded
+	Network      string `json:"network"`
+	Scheme       string `json:"scheme"`
+	Payer        string `json:"payer"`
+	Receiver     string `json:"receiver"`
+	TokenAddress string `json:"tokenAddress"`
+	Amount       string `json:"amount"`
+	Timestamp    int64  `json:"timestamp"`
+	Nonce        string `json:"nonce"`
+	Signature    string `json:"signature,omitempty"`   // EVM: hex encoded EIP-3009 signature
+	Transaction  string `json:"transaction,omitempty"` // Solana: base64 encoded partially-signed transaction
 }
 
 // PaymentRequirements represents the 402 response from the server
 type PaymentRequirements struct {
-	Scheme          string `json:"scheme"`
-	Network         string `json:"network"`
-	Recipient       string `json:"recipient"`
-	Amount          string `json:"amount"`
-	Currency        string `json:"currency"`
-	FacilitatorURL  string `json:"facilitator_url"`
-	Description     string `json:"description"`
+	Scheme         string `json:"scheme"`
+	Network        string `json:"network"`
+	Recipient      string `json:"recipient"`
+	Amount         string `json:"amount"`
+	Currency       string `json:"currency"`
+	FacilitatorURL string `json:"facilitator_url"`
+	Description    string `json:"description"`
+	FeePayer       string `json:"fee_payer,omitempty"` // Solana only: facilitator's pubkey for fee payment
 }
 
 // X402Config holds x402 configuration
@@ -90,18 +96,35 @@ var x402NetworkConfigs = map[string]X402Config{
 		FacilitatorURL: "https://x402.org/facilitator",
 		ChainID:        84532,
 	},
+	"solana": {
+		Network:        "solana",
+		TokenAddress:   USDCSolanaMint,
+		FacilitatorURL: "https://x402.org/facilitator",
+	},
+	"solana-devnet": {
+		Network:        "solana-devnet",
+		TokenAddress:   USDCSolanaDevnetMint,
+		FacilitatorURL: "https://x402.org/facilitator",
+	},
 }
 
-// networkToCAIP2 converts our network names to CAIP-2 format (eip155:chainId)
+// networkToCAIP2 converts our network names to CAIP-2 format
 func networkToCAIP2(network string) string {
 	switch network {
 	case "base":
 		return "eip155:8453"
 	case "base-sepolia":
 		return "eip155:84532"
+	case "solana":
+		return "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+	case "solana-devnet":
+		return "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
 	default:
 		// If already in CAIP-2 format, return as-is
 		if len(network) > 7 && network[:7] == "eip155:" {
+			return network
+		}
+		if len(network) > 7 && network[:7] == "solana:" {
 			return network
 		}
 		// Fallback to base-sepolia
@@ -109,10 +132,17 @@ func networkToCAIP2(network string) string {
 	}
 }
 
+// IsSolanaNetwork returns true if the network is a Solana network
+func IsSolanaNetwork(network string) bool {
+	return network == "solana" || network == "solana-devnet" || strings.HasPrefix(network, "solana:")
+}
+
 // X402Configs for supported networks (exported for compatibility)
 var (
-	X402BaseMainnet = x402NetworkConfigs["base"]
-	X402BaseSepolia = x402NetworkConfigs["base-sepolia"]
+	X402BaseMainnet  = x402NetworkConfigs["base"]
+	X402BaseSepolia  = x402NetworkConfigs["base-sepolia"]
+	X402Solana       = x402NetworkConfigs["solana"]
+	X402SolanaDevnet = x402NetworkConfigs["solana-devnet"]
 )
 
 // CreateX402Payment creates a signed x402 payment for the given requirements
@@ -133,7 +163,7 @@ func (w *Wallet) CreateX402Payment(req *PaymentRequirements) (string, error) {
 		return "", fmt.Errorf("failed to generate payment nonce: %w", err)
 	}
 
-	timestamp := time.Now().Unix()
+	timestamp := timeNow().Unix()
 	validAfter := int64(0)
 	validBefore := timestamp + 300 // 5 minute validity window
 
@@ -193,8 +223,19 @@ type FacilitatorRequest struct {
 	PaymentRequirements PaymentRequirementsV2 `json:"paymentRequirements"`
 }
 
-// BuildFacilitatorRequest creates the x402 v2 format request for the facilitator
+// BuildFacilitatorRequest creates the x402 v2 format request for the facilitator.
+// Handles both EVM (EIP-3009) and Solana (serialized transaction) payloads.
 func BuildFacilitatorRequest(payload *X402Payload, originalReq *PaymentRequirements) *FacilitatorRequest {
+	caip2Network := networkToCAIP2(payload.Network)
+
+	if IsSolanaNetwork(payload.Network) {
+		return buildSolanaFacilitatorRequest(payload, caip2Network)
+	}
+	return buildEVMFacilitatorRequest(payload, caip2Network)
+}
+
+// buildEVMFacilitatorRequest builds the facilitator request for EVM (Base) payments
+func buildEVMFacilitatorRequest(payload *X402Payload, caip2Network string) *FacilitatorRequest {
 	// Calculate validity window (5 minutes from timestamp)
 	validAfter := "0"
 	validBefore := fmt.Sprintf("%d", payload.Timestamp+300)
@@ -212,10 +253,6 @@ func BuildFacilitatorRequest(payload *X402Payload, originalReq *PaymentRequireme
 		Nonce:       nonce,
 	}
 
-	// Convert network to CAIP-2 format (eip155:chainId)
-	caip2Network := networkToCAIP2(payload.Network)
-
-	// Build payment requirements in v2 format
 	paymentReqs := PaymentRequirementsV2{
 		Scheme:            "exact",
 		Network:           caip2Network,
@@ -230,12 +267,39 @@ func BuildFacilitatorRequest(payload *X402Payload, originalReq *PaymentRequireme
 		},
 	}
 
-	// Build the full payload
 	paymentPayload := PaymentPayloadV2{
 		X402Version: 2,
 		Payload: map[string]interface{}{
 			"signature":     payload.Signature,
 			"authorization": authorization,
+		},
+		Accepted: paymentReqs,
+	}
+
+	return &FacilitatorRequest{
+		PaymentPayload:      paymentPayload,
+		PaymentRequirements: paymentReqs,
+	}
+}
+
+// buildSolanaFacilitatorRequest builds the facilitator request for Solana payments
+func buildSolanaFacilitatorRequest(payload *X402Payload, caip2Network string) *FacilitatorRequest {
+	paymentReqs := PaymentRequirementsV2{
+		Scheme:            "exact",
+		Network:           caip2Network,
+		Asset:             payload.TokenAddress,
+		Amount:            payload.Amount,
+		PayTo:             payload.Receiver,
+		MaxTimeoutSeconds: 300,
+		Extra: map[string]interface{}{
+			"assetTransferMethod": "solana-transfer",
+		},
+	}
+
+	paymentPayload := PaymentPayloadV2{
+		X402Version: 2,
+		Payload: map[string]interface{}{
+			"transaction": payload.Transaction,
 		},
 		Accepted: paymentReqs,
 	}
@@ -268,7 +332,10 @@ func VerifyPaymentSignature(payload *X402Payload, expectedPayer string) error {
 		return fmt.Errorf("invalid amount: %s", payload.Amount)
 	}
 
-	chainID := int64(getChainID(payload.Network))
+	chainID, err := getChainID(payload.Network)
+	if err != nil {
+		return fmt.Errorf("cannot verify EVM signature: %w", err)
+	}
 
 	// Convert nonce to hex string with 0x prefix using hexutil
 	// payload.Nonce comes without 0x prefix, so we decode and re-encode properly
@@ -298,7 +365,7 @@ func VerifyPaymentSignature(payload *X402Payload, expectedPayer string) error {
 		Domain: apitypes.TypedDataDomain{
 			Name:              "USD Coin",
 			Version:           "2",
-			ChainId:           math.NewHexOrDecimal256(chainID),
+			ChainId:           math.NewHexOrDecimal256(int64(chainID)),
 			VerifyingContract: payload.TokenAddress,
 		},
 		Message: apitypes.TypedDataMessage{
@@ -388,20 +455,24 @@ func generateNonce() (string, error) {
 	return fmt.Sprintf("%x", b), nil
 }
 
-func getChainID(network string) int {
+func getChainID(network string) (int, error) {
 	switch network {
 	case "base":
-		return 8453
+		return 8453, nil
 	case "base-sepolia":
-		return 84532
+		return 84532, nil
 	default:
-		return 8453
+		return 0, fmt.Errorf("unsupported network for chain ID: %s (Solana networks use CAIP-2 identifiers, not numeric chain IDs)", network)
 	}
 }
 
 // GetTokenDecimals returns the decimals for a given token
 func GetTokenDecimals(tokenAddress string) int {
-	// USDC has 6 decimals on all networks
+	// USDC has 6 decimals on all networks (both EVM and Solana)
+	switch tokenAddress {
+	case USDCBaseAddress, USDCSolanaMint, USDCSolanaDevnetMint:
+		return 6
+	}
 	if common.HexToAddress(tokenAddress) == common.HexToAddress(USDCBaseAddress) {
 		return 6
 	}

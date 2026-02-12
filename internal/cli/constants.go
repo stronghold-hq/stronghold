@@ -7,21 +7,24 @@ const (
 	PrivateKeyHexLength = 64
 
 	// Input field widths
-	PortInputWidth          = 5
-	APIInputWidth           = 50
-	PrivateKeyInputWidth    = 70
-	AccountNumberInputWidth = 25
+	PortInputWidth              = 5
+	APIInputWidth               = 50
+	PrivateKeyInputWidth        = 70
+	SolanaPrivateKeyInputWidth  = 90
+	AccountNumberInputWidth     = 25
 
 	// Input character limits
-	PortInputCharLimit          = 5
-	APIInputCharLimit           = 100
-	PrivateKeyInputCharLimit    = 66 // 64 hex chars + optional 0x prefix
-	AccountNumberInputCharLimit = 19 // XXXX-XXXX-XXXX-XXXX
+	PortInputCharLimit              = 5
+	APIInputCharLimit               = 100
+	PrivateKeyInputCharLimit        = 66  // 64 hex chars + optional 0x prefix
+	SolanaPrivateKeyInputCharLimit  = 100 // base58 Ed25519 key (typically 87-88 chars)
+	AccountNumberInputCharLimit     = 19  // XXXX-XXXX-XXXX-XXXX
 
 	// Defaults
-	DefaultProxyPort   = 8402
-	DefaultAPIEndpoint = "https://api.getstronghold.xyz"
-	DefaultBlockchain  = "base"
+	DefaultProxyPort      = 8402
+	DefaultAPIEndpoint    = "https://api.getstronghold.xyz"
+	DefaultBlockchain     = "base"
+	DefaultSolanaNetwork  = "solana"
 
 	// Retries
 	MaxAccountNumberRetries = 10

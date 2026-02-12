@@ -47,44 +47,64 @@ func AccountBalance() error {
 		return nil
 	}
 
-	if config.Wallet.Address == "" {
+	if config.Wallet.Address == "" && config.Wallet.SolanaAddress == "" {
 		fmt.Println(accountWarningStyle.Render("⚠ Account not fully set up"))
 		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' to complete account setup"))
 		return nil
 	}
 
-	// Load wallet to check balance
-	w, err := wallet.New(wallet.Config{
-		UserID:  config.Auth.UserID,
-		Network: config.Wallet.Network,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to load account: %w", err)
-	}
-
 	fmt.Println(accountTitleStyle.Render("💳 Account"))
 	fmt.Println()
 
-	// Display address
-	fmt.Println("Account ID:")
-	fmt.Println(accountAddressStyle.Render("  " + config.Wallet.Address))
-	fmt.Println()
-
-	// Check balance
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	balance, err := w.GetBalanceHuman(ctx)
-	if err != nil {
-		fmt.Println(accountWarningStyle.Render("⚠ Could not fetch balance"))
-		fmt.Println(accountInfoStyle.Render(fmt.Sprintf("  Error: %v", err)))
-	} else {
-		fmt.Printf("Balance: %s\n", accountBalanceStyle.Render(fmt.Sprintf("%.6f USDC", balance)))
-		if balance < 1.0 {
-			fmt.Println()
-			fmt.Println(accountWarningStyle.Render("⚠ Low balance"))
-			fmt.Println(accountInfoStyle.Render("  Run 'stronghold account deposit' to add funds"))
+	// Show EVM (Base) wallet balance
+	if config.Wallet.Address != "" {
+		fmt.Println("Base (EVM) Wallet:")
+		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.Address))
+
+		w, err := wallet.New(wallet.Config{
+			UserID:  config.Auth.UserID,
+			Network: config.Wallet.Network,
+		})
+		if err != nil {
+			fmt.Println(accountWarningStyle.Render(fmt.Sprintf("  ⚠ Could not load wallet: %v", err)))
+		} else {
+			balance, err := w.GetBalanceHuman(ctx)
+			if err != nil {
+				fmt.Println(accountWarningStyle.Render("  ⚠ Could not fetch balance"))
+			} else {
+				fmt.Printf("  Balance: %s\n", accountBalanceStyle.Render(fmt.Sprintf("%.6f USDC", balance)))
+			}
 		}
+		fmt.Println()
+	}
+
+	// Show Solana wallet balance
+	if config.Wallet.SolanaAddress != "" {
+		fmt.Println("Solana Wallet:")
+		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.SolanaAddress))
+
+		solanaNetwork := config.Wallet.SolanaNetwork
+		if solanaNetwork == "" {
+			solanaNetwork = DefaultSolanaNetwork
+		}
+		sw, err := wallet.NewSolana(wallet.SolanaConfig{
+			UserID:  config.Auth.UserID,
+			Network: solanaNetwork,
+		})
+		if err != nil {
+			fmt.Println(accountWarningStyle.Render(fmt.Sprintf("  ⚠ Could not load wallet: %v", err)))
+		} else {
+			balance, err := sw.GetBalanceHuman(ctx)
+			if err != nil {
+				fmt.Println(accountWarningStyle.Render("  ⚠ Could not fetch balance"))
+			} else {
+				fmt.Printf("  Balance: %s\n", accountBalanceStyle.Render(fmt.Sprintf("%.6f USDC", balance)))
+			}
+		}
+		fmt.Println()
 	}
 
 	return nil
@@ -113,14 +133,19 @@ func AccountDeposit() error {
 		fmt.Println()
 	}
 
-	// Show wallet address for direct deposits
+	// Show Base (EVM) deposit address
 	if config.Wallet.Address != "" {
-		fmt.Println("USDC Deposit Address (Base network):")
+		fmt.Println("Base (EVM) Deposit Address:")
 		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.Address))
+		fmt.Println(accountInfoStyle.Render("  Send USDC on Base network."))
 		fmt.Println()
+	}
 
-		fmt.Println(accountInfoStyle.Render("Send USDC on Base network to the address above."))
-		fmt.Println(accountInfoStyle.Render("Deposits are credited automatically after confirmation."))
+	// Show Solana deposit address
+	if config.Wallet.SolanaAddress != "" {
+		fmt.Println("Solana Deposit Address:")
+		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.SolanaAddress))
+		fmt.Println(accountInfoStyle.Render("  Send USDC on Solana network."))
 		fmt.Println()
 	}
 
@@ -131,7 +156,7 @@ func AccountDeposit() error {
 	fmt.Println()
 
 	fmt.Println(accountWarningStyle.Render("Important:"))
-	fmt.Println(accountInfoStyle.Render("  - Only send USDC on Base network"))
+	fmt.Println(accountInfoStyle.Render("  - Only send USDC on supported networks (Base, Solana)"))
 	fmt.Println(accountInfoStyle.Render("  - Sending other tokens may result in permanent loss"))
 	fmt.Println(accountInfoStyle.Render("  - Deposits typically arrive in 1-2 minutes"))
 
@@ -163,7 +188,28 @@ func SetupWallet(userID string, network string) (string, error) {
 	return w.AddressString(), nil
 }
 
-// ImportWallet imports a wallet from a private key hex string
+// SetupSolanaWallet creates or loads a Solana wallet for the user during install
+func SetupSolanaWallet(userID string, network string) (string, error) {
+	w, err := wallet.NewSolana(wallet.SolanaConfig{
+		UserID:  userID,
+		Network: network,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize Solana wallet: %w", err)
+	}
+
+	if w.Exists() {
+		return w.AddressString(), nil
+	}
+
+	if _, err := w.Create(); err != nil {
+		return "", fmt.Errorf("failed to create Solana wallet: %w", err)
+	}
+
+	return w.AddressString(), nil
+}
+
+// ImportWallet imports an EVM wallet from a private key hex string
 // This is used when logging in on a new device to restore the server-stored wallet
 func ImportWallet(userID string, network string, privateKeyHex string) (string, error) {
 	w, err := wallet.New(wallet.Config{
@@ -177,6 +223,23 @@ func ImportWallet(userID string, network string, privateKeyHex string) (string, 
 	// Import the private key
 	if _, err := w.Import(privateKeyHex); err != nil {
 		return "", fmt.Errorf("failed to import wallet: %w", err)
+	}
+
+	return w.AddressString(), nil
+}
+
+// ImportSolanaWallet imports a Solana wallet from a base58-encoded private key
+func ImportSolanaWallet(userID string, network string, privateKeyBase58 string) (string, error) {
+	w, err := wallet.NewSolana(wallet.SolanaConfig{
+		UserID:  userID,
+		Network: network,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize Solana wallet: %w", err)
+	}
+
+	if _, err := w.Import(privateKeyBase58); err != nil {
+		return "", fmt.Errorf("failed to import Solana wallet: %w", err)
 	}
 
 	return w.AddressString(), nil
@@ -243,7 +306,7 @@ func ExportWallet(outputPath string) error {
 		return nil
 	}
 
-	// Export the key
+	// Export the EVM key
 	privateKey, err := w.Export()
 	if err != nil {
 		return fmt.Errorf("failed to export wallet: %w", err)
@@ -255,14 +318,37 @@ func ExportWallet(outputPath string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Write to file with secure permissions (owner read/write only)
+	// Write EVM key to file with secure permissions
 	if err := os.WriteFile(outputPath, []byte(privateKey), 0600); err != nil {
 		return fmt.Errorf("failed to write backup file: %w", err)
 	}
 
 	fmt.Println()
-	fmt.Println(accountTitleStyle.Render("✓ Wallet exported successfully"))
+	fmt.Println(accountTitleStyle.Render("✓ Base (EVM) wallet exported"))
 	fmt.Println(accountInfoStyle.Render("  Backup saved to: " + outputPath))
+
+	// Also export Solana wallet if it exists
+	if config.Wallet.SolanaAddress != "" {
+		solanaNetwork := config.Wallet.SolanaNetwork
+		if solanaNetwork == "" {
+			solanaNetwork = DefaultSolanaNetwork
+		}
+		sw, err := wallet.NewSolana(wallet.SolanaConfig{
+			UserID:  config.Auth.UserID,
+			Network: solanaNetwork,
+		})
+		if err == nil && sw.Exists() {
+			solanaKey, err := sw.Export()
+			if err == nil {
+				solanaPath := outputPath + "-solana"
+				if err := os.WriteFile(solanaPath, []byte(solanaKey), 0600); err == nil {
+					fmt.Println()
+					fmt.Println(accountTitleStyle.Render("✓ Solana wallet exported"))
+					fmt.Println(accountInfoStyle.Render("  Backup saved to: " + solanaPath))
+				}
+			}
+		}
+	}
 
 	return nil
 }
