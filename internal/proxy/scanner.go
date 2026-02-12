@@ -204,7 +204,20 @@ func (c *ScannerClient) scan(ctx context.Context, endpoint string, reqBody inter
 	return &result, resp.StatusCode, nil, nil
 }
 
-// parsePaymentRequired parses a 402 response to extract payment requirements
+// paymentOption represents a single payment option from the 402 response
+type paymentOption struct {
+	Scheme         string `json:"scheme"`
+	Network        string `json:"network"`
+	Recipient      string `json:"recipient"`
+	Amount         string `json:"amount"`
+	Currency       string `json:"currency"`
+	FacilitatorURL string `json:"facilitator_url"`
+	Description    string `json:"description"`
+}
+
+// parsePaymentRequired parses a 402 response to extract payment requirements.
+// It inspects the "accepts" array and selects the first option the client has
+// a wallet for. Falls back to "payment_requirements" for older servers.
 func (c *ScannerClient) parsePaymentRequired(resp *http.Response) (*wallet.PaymentRequirements, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -212,31 +225,53 @@ func (c *ScannerClient) parsePaymentRequired(resp *http.Response) (*wallet.Payme
 	}
 
 	var response struct {
-		Error               string `json:"error"`
-		PaymentRequirements struct {
-			Scheme          string `json:"scheme"`
-			Network         string `json:"network"`
-			Recipient       string `json:"recipient"`
-			Amount          string `json:"amount"`
-			Currency        string `json:"currency"`
-			FacilitatorURL  string `json:"facilitator_url"`
-			Description     string `json:"description"`
-		} `json:"payment_requirements"`
+		Error               string          `json:"error"`
+		PaymentRequirements paymentOption   `json:"payment_requirements"`
+		Accepts             []paymentOption `json:"accepts"`
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse 402 response: %w", err)
 	}
 
+	// If accepts array present, pick the first option we can pay for
+	if len(response.Accepts) > 0 {
+		for _, opt := range response.Accepts {
+			if c.hasWalletForNetwork(opt.Network) {
+				return optionToRequirements(&opt), nil
+			}
+		}
+		// No matching wallet found; return the first option so the caller
+		// can produce a helpful "no wallet for network X" error
+		return optionToRequirements(&response.Accepts[0]), nil
+	}
+
+	// Backward compat: older servers only send payment_requirements
+	return optionToRequirements(&response.PaymentRequirements), nil
+}
+
+// hasWalletForNetwork returns true if the client has a wallet for the given network
+func (c *ScannerClient) hasWalletForNetwork(network string) bool {
+	if !wallet.IsNetworkSupported(network) {
+		return false
+	}
+	if wallet.IsSolanaNetwork(network) {
+		return c.solanaWallet != nil && c.solanaWallet.Exists()
+	}
+	return c.wallet != nil && c.wallet.Exists()
+}
+
+// optionToRequirements converts a paymentOption to wallet.PaymentRequirements
+func optionToRequirements(opt *paymentOption) *wallet.PaymentRequirements {
 	return &wallet.PaymentRequirements{
-		Scheme:         response.PaymentRequirements.Scheme,
-		Network:        response.PaymentRequirements.Network,
-		Recipient:      response.PaymentRequirements.Recipient,
-		Amount:         response.PaymentRequirements.Amount,
-		Currency:       response.PaymentRequirements.Currency,
-		FacilitatorURL: response.PaymentRequirements.FacilitatorURL,
-		Description:    response.PaymentRequirements.Description,
-	}, nil
+		Scheme:         opt.Scheme,
+		Network:        opt.Network,
+		Recipient:      opt.Recipient,
+		Amount:         opt.Amount,
+		Currency:       opt.Currency,
+		FacilitatorURL: opt.FacilitatorURL,
+		Description:    opt.Description,
+	}
 }
 
 // ShouldScanContentType determines if a content type should be scanned

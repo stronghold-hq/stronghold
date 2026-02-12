@@ -132,6 +132,12 @@ func networkToCAIP2(network string) string {
 	}
 }
 
+// IsNetworkSupported returns true if the network has a known x402 configuration
+func IsNetworkSupported(network string) bool {
+	_, ok := x402NetworkConfigs[network]
+	return ok
+}
+
 // IsSolanaNetwork returns true if the network is a Solana network
 func IsSolanaNetwork(network string) bool {
 	return network == "solana" || network == "solana-devnet" || strings.HasPrefix(network, "solana:")
