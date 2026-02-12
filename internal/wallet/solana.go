@@ -295,13 +295,16 @@ func (w *SolanaWallet) buildTransferTransaction(req *PaymentRequirements, x402Co
 		computebudget.NewSetComputeUnitPriceInstruction(1).Build(),
 	}
 
-	// 3. Create destination ATA if needed
-	createATAInstruction := associatedtokenaccount.NewCreateInstruction(
-		w.PublicKey,     // payer
-		recipientPubkey, // wallet address
-		mintPubkey,      // mint
-	).Build()
-	instructions = append(instructions, createATAInstruction)
+	// 3. Create destination ATA only if it doesn't already exist
+	ataInfo, _ := client.GetAccountInfo(ctx, destATA)
+	if ataInfo == nil || ataInfo.Value == nil {
+		createATAInstruction := associatedtokenaccount.NewCreateInstruction(
+			w.PublicKey,     // payer
+			recipientPubkey, // wallet address
+			mintPubkey,      // mint
+		).Build()
+		instructions = append(instructions, createATAInstruction)
+	}
 
 	// 4. SPL Token TransferChecked
 	transferInstruction := token.NewTransferCheckedInstruction(

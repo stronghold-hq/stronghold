@@ -40,8 +40,10 @@ type CAConfig struct {
 
 // WalletConfig holds wallet configuration
 type WalletConfig struct {
-	Address string `yaml:"address"`
-	Network string `yaml:"network"`
+	Address       string `yaml:"address"`
+	Network       string `yaml:"network"`
+	SolanaAddress string `yaml:"solana_address"`
+	SolanaNetwork string `yaml:"solana_network"`
 }
 
 // ProxyConfig holds proxy-specific configuration
@@ -182,18 +184,32 @@ func NewServer(config *Config) (*Server, error) {
 		connSem:    make(chan struct{}, 10000),
 	}
 
-	// Load wallet if configured
+	// Load EVM wallet if configured
 	if config.Auth.UserID != "" && config.Wallet.Address != "" {
 		w, err := wallet.New(wallet.Config{
 			UserID:  config.Auth.UserID,
 			Network: config.Wallet.Network,
 		})
 		if err != nil {
-			logger.Warn("failed to load wallet", "error", err)
+			logger.Warn("failed to load EVM wallet", "error", err)
 		} else if w.Exists() {
 			s.wallet = w
 			scanner.SetWallet(w)
-			logger.Info("wallet loaded", "address", config.Wallet.Address)
+			logger.Info("EVM wallet loaded", "address", config.Wallet.Address)
+		}
+	}
+
+	// Load Solana wallet if configured
+	if config.Auth.UserID != "" && config.Wallet.SolanaAddress != "" {
+		sw, err := wallet.NewSolana(wallet.SolanaConfig{
+			UserID:  config.Auth.UserID,
+			Network: config.Wallet.SolanaNetwork,
+		})
+		if err != nil {
+			logger.Warn("failed to load Solana wallet", "error", err)
+		} else if sw.Exists() {
+			scanner.SetSolanaWallet(sw)
+			logger.Info("Solana wallet loaded", "address", config.Wallet.SolanaAddress)
 		}
 	}
 

@@ -82,14 +82,17 @@ type X402Config struct {
 }
 
 // WalletForNetwork returns the wallet address for the given network.
-// Returns empty string if no wallet is configured for that network.
+// Returns empty string if no wallet is configured for that network
+// or the network is unknown.
 func (c *X402Config) WalletForNetwork(network string) string {
-	// Solana networks use the Solana wallet
-	if network == "solana" || network == "solana-devnet" {
+	switch network {
+	case "solana", "solana-devnet":
 		return c.SolanaWalletAddress
+	case "base", "base-sepolia":
+		return c.EVMWalletAddress
+	default:
+		return "" // unknown network
 	}
-	// EVM networks use the EVM wallet
-	return c.EVMWalletAddress
 }
 
 // HasPayments returns true if at least one network has a configured wallet
@@ -284,7 +287,8 @@ func getEnvSlice(key string, defaultValue []string) []string {
 
 // loadX402Networks loads the list of supported payment networks.
 // Reads from X402_NETWORKS (comma-separated) first, falls back to
-// the legacy X402_NETWORK (singular) env var for backward compat.
+// the legacy X402_NETWORK (singular) env var, then auto-detects
+// from configured wallet addresses.
 func loadX402Networks() []string {
 	if value := os.Getenv("X402_NETWORKS"); value != "" {
 		var networks []string
@@ -300,7 +304,18 @@ func loadX402Networks() []string {
 	if value := os.Getenv("X402_NETWORK"); value != "" {
 		return []string{value}
 	}
-	return []string{"base"}
+	// Auto-detect networks from configured wallet addresses
+	var networks []string
+	if os.Getenv("X402_EVM_WALLET_ADDRESS") != "" || os.Getenv("X402_WALLET_ADDRESS") != "" {
+		networks = append(networks, "base")
+	}
+	if os.Getenv("X402_SOLANA_WALLET_ADDRESS") != "" {
+		networks = append(networks, "solana")
+	}
+	if len(networks) == 0 {
+		return []string{"base"} // backward compat default
+	}
+	return networks
 }
 
 // Validate checks that all required configuration is present.

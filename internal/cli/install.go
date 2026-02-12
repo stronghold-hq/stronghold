@@ -306,7 +306,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				if err != nil {
 					m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Invalid Solana private key: %v", err)))
 					m.importSolanaKeyInput.SetValue("")
-					m.awaitingSolanaKeyInput = false
+					// Stay in Solana key input state so the user can retry
 					return m, nil
 				}
 				m.config.Wallet.SolanaAddress = solanaAddr

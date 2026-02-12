@@ -27,7 +27,7 @@ CREATE TYPE payment_status AS ENUM (
 CREATE TABLE accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     account_number VARCHAR(19) UNIQUE NOT NULL, -- formatted with dashes: XXXX-XXXX-XXXX-XXXX
-    wallet_address VARCHAR(42), -- Ethereum address for x402 (0x...)
+    wallet_address VARCHAR(64), -- Wallet address for x402 (EVM 0x... or Solana base58)
     balance_usdc DECIMAL(20,6) NOT NULL DEFAULT 0.000000,
     status account_status NOT NULL DEFAULT 'active',
     wallet_escrow_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -42,7 +42,7 @@ CREATE TABLE accounts (
     metadata JSONB DEFAULT '{}'::jsonb,
 
     CONSTRAINT valid_account_number CHECK (account_number ~ '^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4}$'),
-    CONSTRAINT valid_wallet_address CHECK (wallet_address IS NULL OR wallet_address ~ '^0x[a-fA-F0-9]{40}$'),
+    CONSTRAINT valid_wallet_address CHECK (wallet_address IS NULL OR wallet_address ~ '^0x[a-fA-F0-9]{40}$' OR wallet_address ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'),
     CONSTRAINT accounts_balance_non_negative CHECK (balance_usdc >= 0)
 );
 
@@ -126,8 +126,8 @@ CREATE TABLE payment_transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     payment_nonce VARCHAR(128) UNIQUE NOT NULL,
     payment_header TEXT NOT NULL,
-    payer_address VARCHAR(42) NOT NULL,
-    receiver_address VARCHAR(42) NOT NULL,
+    payer_address VARCHAR(64) NOT NULL,
+    receiver_address VARCHAR(64) NOT NULL,
     endpoint VARCHAR(255) NOT NULL,
     amount_usdc DECIMAL(20,6) NOT NULL,
     network VARCHAR(32) NOT NULL,
@@ -141,8 +141,9 @@ CREATE TABLE payment_transactions (
     settled_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ NOT NULL,
 
-    CONSTRAINT valid_payer_address CHECK (payer_address ~ '^0x[a-fA-F0-9]{40}$'),
-    CONSTRAINT valid_receiver_address CHECK (receiver_address ~ '^0x[a-fA-F0-9]{40}$')
+    chain VARCHAR(10) DEFAULT 'base',
+    CONSTRAINT valid_payer_address CHECK (payer_address ~ '^0x[a-fA-F0-9]{40}$' OR payer_address ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'),
+    CONSTRAINT valid_receiver_address CHECK (receiver_address ~ '^0x[a-fA-F0-9]{40}$' OR receiver_address ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 );
 
 -- Index for nonce lookups (idempotency)
@@ -178,12 +179,12 @@ CREATE TABLE deposits (
     net_amount_usdc DECIMAL(20,6) NOT NULL, -- amount - fee
     status deposit_status NOT NULL DEFAULT 'pending',
     provider_transaction_id VARCHAR(255) UNIQUE,
-    wallet_address VARCHAR(42), -- for direct deposits
+    wallet_address VARCHAR(64), -- for direct deposits (EVM or Solana)
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP WITH TIME ZONE,
 
-    CONSTRAINT valid_deposit_wallet CHECK (wallet_address IS NULL OR wallet_address ~ '^0x[a-fA-F0-9]{40}$')
+    CONSTRAINT valid_deposit_wallet CHECK (wallet_address IS NULL OR wallet_address ~ '^0x[a-fA-F0-9]{40}$' OR wallet_address ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$')
 );
 
 -- Create indexes for deposit queries
@@ -264,7 +265,7 @@ COMMENT ON TABLE sessions IS 'JWT refresh token storage for session management';
 COMMENT ON TABLE usage_logs IS 'Billing and analytics for API usage';
 COMMENT ON TABLE deposits IS 'Payment tracking for account funding';
 COMMENT ON COLUMN accounts.account_number IS 'Formatted as XXXX-XXXX-XXXX-XXXX';
-COMMENT ON COLUMN accounts.wallet_address IS 'Ethereum address for x402 payments';
+COMMENT ON COLUMN accounts.wallet_address IS 'Wallet address for x402 payments (EVM 0x... or Solana base58)';
 COMMENT ON COLUMN accounts.encrypted_private_key IS 'KMS-encrypted wallet private key (base64-encoded ciphertext)';
 COMMENT ON COLUMN accounts.kms_key_id IS 'ARN or alias of the KMS key used for encryption';
 COMMENT ON COLUMN accounts.key_encrypted_at IS 'Timestamp when the key was encrypted';
@@ -274,6 +275,7 @@ COMMENT ON COLUMN payment_transactions.payment_header IS 'Full X-Payment header 
 COMMENT ON COLUMN payment_transactions.status IS 'State machine: reserved -> executing -> settling -> completed/failed/expired';
 COMMENT ON COLUMN payment_transactions.service_result IS 'Cached scan result for idempotent replay';
 COMMENT ON COLUMN payment_transactions.settlement_attempts IS 'Number of settlement retry attempts';
+COMMENT ON COLUMN payment_transactions.chain IS 'Blockchain used for this payment (base, solana, etc.)';
 -- Processed webhook events for idempotency (H6)
 CREATE TABLE processed_webhook_events (
     event_id VARCHAR(255) PRIMARY KEY,

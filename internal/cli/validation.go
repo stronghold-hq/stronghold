@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/mr-tron/base58"
 )
 
 // ValidationError represents a validation error with field context
@@ -53,7 +55,7 @@ func ValidatePrivateKeyBase58(privateKey string) (string, error) {
 	}
 
 	// Base58 decode to validate format
-	decoded, err := base58Decode(cleaned)
+	decoded, err := base58.Decode(cleaned)
 	if err != nil {
 		return "", &ValidationError{
 			Field:   "solana_private_key",
@@ -70,39 +72,4 @@ func ValidatePrivateKeyBase58(privateKey string) (string, error) {
 	}
 
 	return cleaned, nil
-}
-
-// base58Decode decodes a base58-encoded string (Bitcoin alphabet).
-func base58Decode(input string) ([]byte, error) {
-	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-	result := make([]byte, 0, len(input))
-	for i := 0; i < len(input); i++ {
-		idx := strings.IndexByte(alphabet, input[i])
-		if idx < 0 {
-			return nil, fmt.Errorf("invalid base58 character: %c", input[i])
-		}
-		carry := idx
-		for j := 0; j < len(result); j++ {
-			carry += int(result[j]) * 58
-			result[j] = byte(carry & 0xff)
-			carry >>= 8
-		}
-		for carry > 0 {
-			result = append(result, byte(carry&0xff))
-			carry >>= 8
-		}
-	}
-
-	// Add leading zeros
-	for i := 0; i < len(input) && input[i] == '1'; i++ {
-		result = append(result, 0)
-	}
-
-	// Reverse
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		result[i], result[j] = result[j], result[i]
-	}
-
-	return result, nil
 }
