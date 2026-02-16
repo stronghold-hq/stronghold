@@ -114,8 +114,12 @@ func (m *MITMHandler) proxyHTTPS(clientConn, serverConn net.Conn, host string) e
 		// Scan request body if it exists (for prompt injection in POST data)
 		var requestBody []byte
 		if req.Body != nil && req.ContentLength != 0 && m.config.Scanning.Content.Enabled {
-			requestBody, _ = io.ReadAll(io.LimitReader(req.Body, 1024*1024+1))
+			var readErr error
+			requestBody, readErr = io.ReadAll(io.LimitReader(req.Body, 1024*1024+1))
 			req.Body.Close()
+			if readErr != nil {
+				m.logger.Error("failed to read request body", "url", req.URL.String(), "error", readErr)
+			}
 
 			// Scan the request content (skip if over 1MB)
 			if len(requestBody) > 0 && len(requestBody) <= 1024*1024 {
@@ -245,5 +249,7 @@ func (m *MITMHandler) sendBlockResponse(conn net.Conn, result *ScanResult, req *
 	resp.Header.Set("X-Stronghold-Decision", string(result.Decision))
 	resp.Header.Set("X-Stronghold-Reason", result.Reason)
 
-	resp.Write(conn)
+	if err := resp.Write(conn); err != nil {
+		m.logger.Error("failed to send block response", "url", req.URL.String(), "error", err)
+	}
 }
