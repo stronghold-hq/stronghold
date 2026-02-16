@@ -127,6 +127,7 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 | stronghold doctor          | Check system prerequisites                            | No   |
 | stronghold init            | Interactive setup                                     | Yes  |
 | stronghold init --yes      | Non-interactive setup with defaults                   | Yes  |
+| stronghold init --yes --skip-service | Skip proxy/service install (account setup only) | No |
 | stronghold enable          | Start proxy, enable traffic interception              | Yes  |
 | stronghold disable         | Stop proxy, restore direct access                     | Yes  |
 | stronghold status          | Show proxy status and statistics                      | No   |
@@ -176,7 +177,15 @@ stronghold wallet balance
 
 ### Wallet Replace
 
-Replace an existing wallet with a new private key:
+Replace an existing wallet with a new private key.
+
+Key source precedence (first match wins):
+1. `--file` flag (explicit file path)
+2. Environment variable (`STRONGHOLD_PRIVATE_KEY` for EVM, `STRONGHOLD_SOLANA_PRIVATE_KEY` for Solana)
+3. stdin (if piped)
+4. Interactive prompt (if terminal)
+
+Accepted chain values: `evm`, `base` (alias for evm), `solana`.
 
 ```bash
 # Replace Base (EVM) wallet (default)

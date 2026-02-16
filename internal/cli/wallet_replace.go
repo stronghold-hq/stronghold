@@ -217,19 +217,19 @@ func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
 
 func normalizeWalletChain(chain string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(chain)) {
-	case "evm":
+	case "evm", "base":
 		return "base", nil
 	case "solana":
 		return "solana", nil
 	default:
-		return "", fmt.Errorf("invalid chain %q (expected: evm|solana)", chain)
+		return "", fmt.Errorf("invalid chain %q (expected: evm|base|solana)", chain)
 	}
 }
 
 // readPrivateKey reads the private key from various sources in order of precedence:
-// 1. stdin (if piped)
+// 1. --file flag (explicit file path)
 // 2. STRONGHOLD_PRIVATE_KEY or STRONGHOLD_SOLANA_PRIVATE_KEY environment variable
-// 3. --file flag
+// 3. stdin (if piped)
 // 4. interactive prompt (if terminal)
 //
 // Returns a SecureBytes that must be zeroed when done (caller should use defer key.Zero()).
@@ -241,24 +241,7 @@ func readPrivateKey(fileFlag string, isSolana bool) (*SecureBytes, error) {
 		promptLabel = "Enter Solana private key (base58): "
 	}
 
-	// 1. Check stdin (if piped)
-	stdinInfo, _ := os.Stdin.Stat()
-	if (stdinInfo.Mode() & os.ModeCharDevice) == 0 {
-		// stdin has data piped to it
-		reader := bufio.NewReader(os.Stdin)
-		key, err := reader.ReadString('\n')
-		if err != nil && key == "" {
-			return nil, fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		return NewSecureBytes([]byte(strings.TrimSpace(key))), nil
-	}
-
-	// 2. Check environment variable
-	if envKey := os.Getenv(envVar); envKey != "" {
-		return NewSecureBytes([]byte(strings.TrimSpace(envKey))), nil
-	}
-
-	// 3. Check file flag
+	// 1. Check file flag (highest precedence — explicit user intent)
 	if fileFlag != "" {
 		info, err := os.Stat(fileFlag)
 		if err != nil {
@@ -287,6 +270,23 @@ func readPrivateKey(fileFlag string, isSolana bool) (*SecureBytes, error) {
 			data[i] = 0
 		}
 		return NewSecureBytes([]byte(trimmed)), nil
+	}
+
+	// 2. Check environment variable
+	if envKey := os.Getenv(envVar); envKey != "" {
+		return NewSecureBytes([]byte(strings.TrimSpace(envKey))), nil
+	}
+
+	// 3. Check stdin (if piped)
+	stdinInfo, _ := os.Stdin.Stat()
+	if (stdinInfo.Mode() & os.ModeCharDevice) == 0 {
+		// stdin has data piped to it
+		reader := bufio.NewReader(os.Stdin)
+		key, err := reader.ReadString('\n')
+		if err != nil && key == "" {
+			return nil, fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		return NewSecureBytes([]byte(strings.TrimSpace(key))), nil
 	}
 
 	// 4. Interactive prompt (only if terminal)

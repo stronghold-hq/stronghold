@@ -13,6 +13,7 @@ func TestNormalizeWalletChain(t *testing.T) {
 		want  string
 	}{
 		{name: "evm alias", input: "evm", want: "base"},
+		{name: "base alias", input: "base", want: "base"},
 		{name: "solana", input: "solana", want: "solana"},
 	}
 
@@ -33,11 +34,6 @@ func TestNormalizeWalletChain_Invalid(t *testing.T) {
 	_, err := normalizeWalletChain("")
 	if err == nil {
 		t.Fatal("expected error for empty chain")
-	}
-
-	_, err = normalizeWalletChain("base")
-	if err == nil {
-		t.Fatal("expected error for base chain alias")
 	}
 
 	_, err = normalizeWalletChain("bitcoin")

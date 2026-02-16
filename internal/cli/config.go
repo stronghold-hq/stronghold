@@ -108,6 +108,12 @@ type CLIConfig struct {
 // DefaultConfig returns a default configuration
 func DefaultConfig() *CLIConfig {
 	homeDir, _ := os.UserHomeDir()
+
+	apiEndpoint := "https://api.getstronghold.xyz"
+	if envURL := os.Getenv("STRONGHOLD_API_URL"); envURL != "" {
+		apiEndpoint = envURL
+	}
+
 	return &CLIConfig{
 		Version: ConfigVersion,
 		Proxy: ProxyConfig{
@@ -115,7 +121,7 @@ func DefaultConfig() *CLIConfig {
 			Bind: "127.0.0.1",
 		},
 		API: APIConfig{
-			Endpoint: "https://api.getstronghold.xyz",
+			Endpoint: apiEndpoint,
 			Timeout:  30 * time.Second,
 		},
 		Auth: AuthConfig{

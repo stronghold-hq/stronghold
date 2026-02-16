@@ -56,12 +56,16 @@ through Stronghold's scanning service. Intended for isolated machines only.`,
 			privateKey, _ := cmd.Flags().GetString("private-key")
 			solanaPrivateKey, _ := cmd.Flags().GetString("solana-private-key")
 			accountNumber, _ := cmd.Flags().GetString("account-number")
+			skipService, _ := cmd.Flags().GetBool("skip-service")
+			if !nonInteractive && skipService {
+				fmt.Println(cli.WarningStyle.Render("Warning:"), "--skip-service has no effect without --yes flag")
+			}
 			if !nonInteractive && (privateKey != "" || solanaPrivateKey != "" || accountNumber != "") {
 				fmt.Println(cli.WarningStyle.Render("Warning:"), "--private-key, --solana-private-key, and --account-number require --yes flag")
 				fmt.Println("Running interactive mode instead. Use --yes for non-interactive.")
 			}
 			if nonInteractive {
-				return cli.RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber)
+				return cli.RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber, skipService)
 			}
 			return cli.RunInit()
 		},
@@ -70,6 +74,7 @@ through Stronghold's scanning service. Intended for isolated machines only.`,
 	initCmd.Flags().String("private-key", "", "Import EVM wallet from private key (hex) - requires --yes")
 	initCmd.Flags().String("solana-private-key", "", "Import Solana wallet from private key (base58) - requires --yes")
 	initCmd.Flags().String("account-number", "", "Login to existing account - requires --yes")
+	initCmd.Flags().Bool("skip-service", false, "Skip proxy binary install, service setup, and transparent proxy enable")
 
 	// Enable command
 	enableCmd := &cobra.Command{
@@ -325,9 +330,9 @@ Supported chain values:
   solana         Replace the Solana wallet
 
 Reads the private key from (in order of precedence):
-  1. stdin (if piped)
+  1. --file flag (explicit file path)
   2. Environment variable (STRONGHOLD_PRIVATE_KEY for EVM, STRONGHOLD_SOLANA_PRIVATE_KEY for Solana)
-  3. --file flag
+  3. stdin (if piped)
   4. Interactive prompt (if terminal)
 
 For EVM wallets, you'll be asked whether to upload the key to the server

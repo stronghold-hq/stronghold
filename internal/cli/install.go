@@ -835,8 +835,9 @@ func (m *InstallModel) runChecks() tea.Cmd {
 				m.errorMsg = "Could not find an available port"
 				return nil
 			}
+			oldPort := m.config.Proxy.Port
 			m.config.Proxy.Port = newPort
-			m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Port %d in use, using port %d", m.config.Proxy.Port, newPort)))
+			m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Port %d in use, using port %d", oldPort, newPort)))
 		} else {
 			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Port %d available", m.config.Proxy.Port)))
 		}
@@ -1116,7 +1117,7 @@ func RunInit() error {
 // privateKey: optional hex private key to import for EVM wallet (for pre-funded wallets)
 // solanaPrivateKey: optional base58 private key to import for Solana wallet
 // accountNumber: optional account number to login to existing account
-func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) error {
+func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string, skipService bool) error {
 	config := DefaultConfig()
 
 	// Check platform
@@ -1130,8 +1131,9 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) e
 		if newPort == 0 {
 			return fmt.Errorf("no available ports found")
 		}
+		oldPort := config.Proxy.Port
 		config.Proxy.Port = newPort
-		fmt.Printf("Port %d in use, using port %d\n", config.Proxy.Port, newPort)
+		fmt.Printf("Port %d in use, using port %d\n", oldPort, newPort)
 	}
 
 	// Handle account setup
@@ -1265,47 +1267,55 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) e
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	// Install binaries
-	destPath := "/usr/local/bin/stronghold-proxy"
-	if _, err := os.Stat("./cmd/proxy/main.go"); err == nil {
-		cmd := exec.Command("go", "build", "-o", destPath, "./cmd/proxy")
-		if _, err := cmd.CombinedOutput(); err != nil {
-			userBin := filepath.Join(os.Getenv("HOME"), ".local", "bin")
-			os.MkdirAll(userBin, 0755)
-			destPath = filepath.Join(userBin, "stronghold-proxy")
-			cmd = exec.Command("go", "build", "-o", destPath, "./cmd/proxy")
+	if !skipService {
+		// Install binaries
+		destPath := "/usr/local/bin/stronghold-proxy"
+		if _, err := os.Stat("./cmd/proxy/main.go"); err == nil {
+			cmd := exec.Command("go", "build", "-o", destPath, "./cmd/proxy")
 			if _, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("failed to build proxy: %w", err)
+				userBin := filepath.Join(os.Getenv("HOME"), ".local", "bin")
+				os.MkdirAll(userBin, 0755)
+				destPath = filepath.Join(userBin, "stronghold-proxy")
+				cmd = exec.Command("go", "build", "-o", destPath, "./cmd/proxy")
+				if _, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to build proxy: %w", err)
+				}
 			}
 		}
-	}
 
-	// Install service
-	serviceManager := NewServiceManager(config)
-	if err := serviceManager.InstallService(); err != nil {
-		return fmt.Errorf("failed to install service: %w", err)
-	}
+		// Install service
+		serviceManager := NewServiceManager(config)
+		if err := serviceManager.InstallService(); err != nil {
+			return fmt.Errorf("failed to install service: %w", err)
+		}
 
-	// Start proxy
-	if err := serviceManager.Start(); err != nil {
-		return fmt.Errorf("failed to start proxy: %w", err)
-	}
+		// Start proxy
+		if err := serviceManager.Start(); err != nil {
+			return fmt.Errorf("failed to start proxy: %w", err)
+		}
 
-	// Enable transparent proxy
-	tp := NewTransparentProxy(config)
-	if !tp.IsAvailable() {
-		return fmt.Errorf("transparent proxy not available on this system")
-	}
-	if err := tp.Enable(); err != nil {
-		return fmt.Errorf("failed to enable transparent proxy: %w", err)
+		// Enable transparent proxy
+		tp := NewTransparentProxy(config)
+		if !tp.IsAvailable() {
+			return fmt.Errorf("transparent proxy not available on this system")
+		}
+		if err := tp.Enable(); err != nil {
+			return fmt.Errorf("failed to enable transparent proxy: %w", err)
+		}
 	}
 
 	config.Installed = true
 	config.InstallDate = time.Now().Format(time.RFC3339)
-	config.Save()
+	if err := config.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
 
-	fmt.Println("✓ Initialization complete!")
-	fmt.Printf("Proxy running on %s (transparent mode)\n", config.GetProxyAddr())
+	if skipService {
+		fmt.Println("\u2713 Initialization complete! (service setup skipped)")
+	} else {
+		fmt.Println("\u2713 Initialization complete!")
+		fmt.Printf("Proxy running on %s (transparent mode)\n", config.GetProxyAddr())
+	}
 
 	return nil
 }

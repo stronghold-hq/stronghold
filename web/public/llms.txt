@@ -59,6 +59,7 @@ stronghold health
 | stronghold doctor          | Check system prerequisites                            |
 | stronghold init            | Interactive setup (requires sudo)                     |
 | stronghold init --yes      | Non-interactive setup with defaults                   |
+| stronghold init --yes --skip-service | Skip proxy/service install (account setup only) |
 | stronghold enable          | Start proxy, enable interception                      |
 | stronghold disable         | Stop proxy, restore direct access                     |
 | stronghold status          | Show proxy status and statistics                      |
@@ -88,6 +89,12 @@ stronghold init --yes --solana-private-key <base58-solana-key>
 
 ### Wallet Replace
 
+Key source precedence (first match wins):
+1. `--file` flag (explicit file path)
+2. Environment variable (`STRONGHOLD_PRIVATE_KEY` for EVM, `STRONGHOLD_SOLANA_PRIVATE_KEY` for Solana)
+3. stdin (if piped)
+4. Interactive prompt (if terminal)
+
 ```bash
 # List configured wallets and balances
 stronghold wallet list
@@ -102,7 +109,16 @@ stronghold wallet replace solana
 # Non-interactive with env var
 STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace evm --yes
 STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace solana --yes
+
+# From file
+stronghold wallet replace evm --file /path/to/key.txt
 ```
+
+### Environment Variables
+
+| Variable             | Description                                |
+|----------------------|--------------------------------------------|
+| STRONGHOLD_API_URL   | Override API endpoint (dev/testing)         |
 
 ### Response Headers for Agentic Integration
 
