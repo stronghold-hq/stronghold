@@ -19,7 +19,7 @@ func TestGetUsageStats_Aggregation(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -76,7 +76,7 @@ func TestGetDailyStats_DateRange(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -125,7 +125,7 @@ func TestPagination_Limits(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -184,7 +184,7 @@ func TestGetDailyUsageStats_DaysEnforced(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	t.Run("days <= 0 defaults to 30", func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestGetEndpointUsageStats(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -268,7 +268,7 @@ func TestGetUsageLogsByDateRange(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -314,7 +314,7 @@ func TestCreateUsageLog_AllFields(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint
@@ -375,7 +375,7 @@ func TestUsageStats_EmptyAccount(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	end := time.Now().UTC().Add(time.Hour)
@@ -397,7 +397,7 @@ func TestGetUsageLogs_OrderedByCreatedAtDesc(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Fund the account so usage deductions don't violate balance constraint

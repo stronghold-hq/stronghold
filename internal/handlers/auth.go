@@ -178,10 +178,11 @@ type CreateAccountRequest struct {
 
 // CreateAccountResponse represents the response after creating an account
 type CreateAccountResponse struct {
-	AccountNumber string    `json:"account_number"`
-	WalletAddress string    `json:"wallet_address,omitempty"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	RecoveryFile  string    `json:"recovery_file"`
+	AccountNumber    string    `json:"account_number"`
+	WalletAddress    string    `json:"wallet_address,omitempty"`
+	EVMWalletAddress string    `json:"evm_wallet_address,omitempty"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	RecoveryFile     string    `json:"recovery_file"`
 }
 
 // CreateAccount creates a new account with a generated account number
@@ -211,15 +212,15 @@ func (h *AuthHandler) CreateAccount(c fiber.Ctx) error {
 		})
 	}
 
-	// Validate wallet address if provided
+	// Validate wallet address if provided (only EVM addresses supported via this endpoint)
 	if req.WalletAddress != nil && !isValidWalletAddress(*req.WalletAddress) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid wallet address format",
 		})
 	}
 
-	// Create account
-	account, err := h.db.CreateAccount(ctx, req.WalletAddress)
+	// Create account - wallet address provided here is always EVM
+	account, err := h.db.CreateAccount(ctx, req.WalletAddress, nil)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create account",
@@ -258,6 +259,7 @@ func (h *AuthHandler) CreateAccount(c fiber.Ctx) error {
 	}
 	if req.WalletAddress != nil {
 		response.WalletAddress = *req.WalletAddress
+		response.EVMWalletAddress = *req.WalletAddress
 	}
 	return c.Status(fiber.StatusCreated).JSON(response)
 }
@@ -269,12 +271,14 @@ type LoginRequest struct {
 
 // LoginResponse represents the login response
 type LoginResponse struct {
-	AccountNumber string    `json:"account_number"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	WalletAddress *string   `json:"wallet_address,omitempty"`
-	TOTPRequired  bool      `json:"totp_required"`
-	DeviceTrusted bool      `json:"device_trusted"`
-	EscrowEnabled bool      `json:"wallet_escrow_enabled"`
+	AccountNumber       string    `json:"account_number"`
+	ExpiresAt           time.Time `json:"expires_at"`
+	WalletAddress       *string   `json:"wallet_address,omitempty"`
+	EVMWalletAddress    *string   `json:"evm_wallet_address,omitempty"`
+	SolanaWalletAddress *string   `json:"solana_wallet_address,omitempty"`
+	TOTPRequired        bool      `json:"totp_required"`
+	DeviceTrusted       bool      `json:"device_trusted"`
+	EscrowEnabled       bool      `json:"wallet_escrow_enabled"`
 }
 
 // Login authenticates an account by account number
@@ -387,12 +391,14 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	}
 
 	response := LoginResponse{
-		AccountNumber: account.AccountNumber,
-		ExpiresAt:     expiresAt,
-		WalletAddress: account.WalletAddress,
-		TOTPRequired:  totpRequired,
-		DeviceTrusted: deviceTrusted,
-		EscrowEnabled: account.WalletEscrow,
+		AccountNumber:       account.AccountNumber,
+		ExpiresAt:           expiresAt,
+		WalletAddress:       account.EVMWalletAddress,
+		EVMWalletAddress:    account.EVMWalletAddress,
+		SolanaWalletAddress: account.SolanaWalletAddress,
+		TOTPRequired:        totpRequired,
+		DeviceTrusted:       deviceTrusted,
+		EscrowEnabled:       account.WalletEscrow,
 	}
 
 	return c.JSON(response)
@@ -527,7 +533,7 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 // @Description Returns the authenticated user's account information
 // @Tags auth
 // @Produce json
-// @Success 200 {object} map[string]interface{} "Account info with id, account_number, wallet_address, balance_usdc, status"
+// @Success 200 {object} map[string]interface{} "Account info with id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status"
 // @Failure 401 {object} map[string]string "Not authenticated"
 // @Security CookieAuth
 // @Router /v1/auth/me [get]
@@ -555,17 +561,23 @@ func (h *AuthHandler) GetMe(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(fiber.Map{
+	resp := fiber.Map{
 		"id":                    account.ID,
 		"account_number":        account.AccountNumber,
-		"wallet_address":        account.WalletAddress,
+		"evm_wallet_address":    account.EVMWalletAddress,
+		"solana_wallet_address": account.SolanaWalletAddress,
 		"balance_usdc":          account.BalanceUSDC,
 		"status":                account.Status,
 		"wallet_escrow_enabled": account.WalletEscrow,
 		"totp_enabled":          account.TOTPEnabled,
 		"created_at":            account.CreatedAt,
 		"last_login_at":         account.LastLoginAt,
-	})
+	}
+	if account.EVMWalletAddress != nil {
+		resp["wallet_address"] = account.EVMWalletAddress
+	}
+
+	return c.JSON(resp)
 }
 
 // GetWalletKeyResponse represents the response from the wallet key endpoint
@@ -780,7 +792,8 @@ type UpdateWalletRequest struct {
 
 // UpdateWalletResponse represents the response from updating wallet
 type UpdateWalletResponse struct {
-	WalletAddress string `json:"wallet_address"`
+	WalletAddress    string `json:"wallet_address"`
+	EVMWalletAddress string `json:"evm_wallet_address"`
 }
 
 // UpdateWallet updates the wallet for the authenticated account
@@ -912,7 +925,8 @@ func (h *AuthHandler) UpdateWallet(c fiber.Ctx) error {
 	)
 
 	return c.JSON(UpdateWalletResponse{
-		WalletAddress: address,
+		WalletAddress:    address,
+		EVMWalletAddress: address,
 	})
 }
 

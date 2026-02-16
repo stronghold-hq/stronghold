@@ -6,6 +6,46 @@ import (
 	"testing"
 )
 
+func TestNormalizeWalletChain(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "evm alias", input: "evm", want: "base"},
+		{name: "solana", input: "solana", want: "solana"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeWalletChain(tc.input)
+			if err != nil {
+				t.Fatalf("normalizeWalletChain(%q) returned error: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeWalletChain(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeWalletChain_Invalid(t *testing.T) {
+	_, err := normalizeWalletChain("")
+	if err == nil {
+		t.Fatal("expected error for empty chain")
+	}
+
+	_, err = normalizeWalletChain("base")
+	if err == nil {
+		t.Fatal("expected error for base chain alias")
+	}
+
+	_, err = normalizeWalletChain("bitcoin")
+	if err == nil {
+		t.Fatal("expected error for invalid chain")
+	}
+}
+
 func TestReadPrivateKey_ValidFile(t *testing.T) {
 	// Create a temp file with a valid 64-char hex key
 	tmpDir := t.TempDir()

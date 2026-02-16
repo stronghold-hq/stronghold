@@ -14,7 +14,7 @@ import (
 )
 
 // WalletReplace replaces the current wallet with a new private key
-// chainFlag: which chain wallet to replace ("base" or "solana", empty = "base")
+// chainFlag: which chain wallet to replace ("evm"/"base" or "solana")
 // fileFlag: path to file containing private key
 // yesFlag: skip confirmation warnings
 func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
@@ -27,12 +27,12 @@ func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
 		return fmt.Errorf("not logged in. Run 'stronghold init' first")
 	}
 
-	// Default to base if no chain specified
-	if chainFlag == "" {
-		chainFlag = "base"
+	normalizedChain, err := normalizeWalletChain(chainFlag)
+	if err != nil {
+		return err
 	}
 
-	isSolana := chainFlag == "solana"
+	isSolana := normalizedChain == "solana"
 
 	// Read private key from various sources (in order of precedence)
 	privateKey, err := readPrivateKey(fileFlag, isSolana)
@@ -82,6 +82,16 @@ func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
 		}
 
 		fmt.Printf("%s Solana wallet updated: %s\n", successStyle.Render("✓"), address)
+
+		// Register the new Solana address with the server (best-effort)
+		if config.Auth.AccountNumber != "" {
+			apiClient := NewAPIClient(config.API.Endpoint, config.Auth.DeviceToken)
+			if _, err := apiClient.Login(config.Auth.AccountNumber); err == nil {
+				if err := apiClient.RegisterWalletAddresses("", address); err == nil {
+					fmt.Println(successStyle.Render("✓ Solana address registered with server"))
+				}
+			}
+		}
 	} else {
 		// Validate EVM key
 		cleanedKey, err := ValidatePrivateKeyHex(privateKey.String())
@@ -181,9 +191,15 @@ func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
 				return fmt.Errorf("failed to upload wallet to server: %w", err)
 			}
 			fmt.Println(successStyle.Render("✓ Wallet updated on server"))
+
+			// Also register the public address with the server (best-effort)
+			if err := apiClient.RegisterWalletAddresses(address, ""); err == nil {
+				fmt.Println(successStyle.Render("✓ EVM address registered with server"))
+			}
 		} else {
 			fmt.Println(warningStyle.Render("WARNING:"))
 			fmt.Println("Wallet updated locally only. Server sync was skipped.")
+			fmt.Println("Server wallet address was not changed.")
 			fmt.Println("To upload later, rerun 'stronghold wallet replace' and choose upload when prompted.")
 		}
 
@@ -197,6 +213,17 @@ func WalletReplace(chainFlag, fileFlag string, yesFlag bool) error {
 	}
 
 	return nil
+}
+
+func normalizeWalletChain(chain string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "evm":
+		return "base", nil
+	case "solana":
+		return "solana", nil
+	default:
+		return "", fmt.Errorf("invalid chain %q (expected: evm|solana)", chain)
+	}
 }
 
 // readPrivateKey reads the private key from various sources in order of precedence:

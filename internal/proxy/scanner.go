@@ -113,7 +113,7 @@ func (c *ScannerClient) ScanContent(ctx context.Context, content []byte, sourceU
 func (c *ScannerClient) scanWithPayment(ctx context.Context, endpoint string, reqBody interface{}) (*ScanResult, error) {
 	// Try the request first (might already have credit or in dev mode)
 	result, statusCode, paymentReq, err := c.scan(ctx, endpoint, reqBody, "")
-	
+
 	// If successful or error other than 402, return immediately
 	if err != nil || statusCode != http.StatusPaymentRequired {
 		return result, err
@@ -131,7 +131,7 @@ func (c *ScannerClient) scanWithPayment(ctx context.Context, endpoint string, re
 	}
 
 	if selectedWallet == nil {
-		return nil, fmt.Errorf("payment required but no wallet configured for network %s. Run 'stronghold wallet show' to check your balance or visit https://getstronghold.xyz/dashboard to add funds", paymentReq.Network)
+		return nil, fmt.Errorf("payment required but no wallet configured for network %s. Run 'stronghold wallet list' or 'stronghold wallet balance' to check wallet status, or visit https://getstronghold.xyz/dashboard to add funds", paymentReq.Network)
 	}
 
 	// Create x402 payment

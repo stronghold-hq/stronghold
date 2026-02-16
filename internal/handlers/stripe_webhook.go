@@ -155,6 +155,14 @@ func (h *StripeWebhookHandler) handleOnrampSessionUpdated(c fiber.Ctx, obj map[s
 			})
 		}
 
+		// Log the network from deposit metadata if available
+		depositNetwork := "unknown"
+		if deposit.Metadata != nil {
+			if n, ok := deposit.Metadata["network"].(string); ok {
+				depositNetwork = n
+			}
+		}
+
 		// Complete the deposit and credit the account
 		if err := h.db.CompleteDeposit(ctx, parsedDepositID); err != nil {
 			slog.Error("failed to complete deposit", "deposit_id", parsedDepositID, "error", err)
@@ -164,13 +172,24 @@ func (h *StripeWebhookHandler) handleOnrampSessionUpdated(c fiber.Ctx, obj map[s
 			})
 		}
 
-		slog.Info("deposit completed successfully", "deposit_id", parsedDepositID)
+		slog.Info("deposit completed successfully",
+			"deposit_id", parsedDepositID,
+			"network", depositNetwork,
+		)
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"received": true,
 			"status":   "completed",
 		})
 
 	case "rejected":
+		// Log the network from deposit metadata if available
+		depositNetwork := "unknown"
+		if rejDeposit, err := h.db.GetDepositByID(ctx, parsedDepositID); err == nil && rejDeposit.Metadata != nil {
+			if n, ok := rejDeposit.Metadata["network"].(string); ok {
+				depositNetwork = n
+			}
+		}
+
 		// Mark deposit as failed
 		if err := h.db.FailDeposit(ctx, parsedDepositID, "Stripe onramp session rejected"); err != nil {
 			slog.Error("failed to mark deposit as failed", "deposit_id", parsedDepositID, "error", err)
@@ -180,7 +199,10 @@ func (h *StripeWebhookHandler) handleOnrampSessionUpdated(c fiber.Ctx, obj map[s
 			})
 		}
 
-		slog.Info("deposit marked as failed", "deposit_id", parsedDepositID)
+		slog.Info("deposit marked as failed",
+			"deposit_id", parsedDepositID,
+			"network", depositNetwork,
+		)
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"received": true,
 			"status":   "failed",

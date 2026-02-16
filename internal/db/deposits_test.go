@@ -19,7 +19,7 @@ func TestCompleteDeposit_UpdatesBalance(t *testing.T) {
 	ctx := context.Background()
 
 	// Create account with 0 balance
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, account.BalanceUSDC)
 
@@ -60,7 +60,7 @@ func TestCompleteDeposit_Atomic(t *testing.T) {
 	ctx := context.Background()
 
 	// Create account
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create deposit
@@ -112,7 +112,7 @@ func TestStripeFeeCalculation(t *testing.T) {
 			db := &DB{pool: testDB.Pool}
 			ctx := context.Background()
 
-			account, err := db.CreateAccount(ctx, nil)
+			account, err := db.CreateAccount(ctx, nil, nil)
 			require.NoError(t, err)
 
 			// Create Stripe deposit with calculated fee
@@ -150,7 +150,7 @@ func TestGetDepositsByAccount_Pagination(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create multiple deposits
@@ -189,7 +189,7 @@ func TestGetDepositsByAccount_LimitEnforced(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Request with limit > 1000 (should be capped)
@@ -204,7 +204,7 @@ func TestFailDeposit(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	deposit := &Deposit{
@@ -242,7 +242,7 @@ func TestGetDepositByProviderTransactionID(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	providerTxID := "pi_1234567890"
@@ -270,7 +270,7 @@ func TestGetDepositStats(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create and complete some deposits
@@ -316,7 +316,7 @@ func TestGetPendingDeposits(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create pending deposits
@@ -376,7 +376,7 @@ func TestUpdateDepositStatus(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	deposit := &Deposit{
@@ -405,7 +405,7 @@ func TestDeposit_NetAmountCalculatedCorrectly(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create deposit where net should equal amount - fee

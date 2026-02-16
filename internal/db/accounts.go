@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // AccountStatus represents the status of an account
@@ -22,19 +24,32 @@ const (
 	AccountStatusClosed    AccountStatus = "closed"
 )
 
+var (
+	evmWalletAddressRegex    = regexp.MustCompile(`^0x[a-fA-F0-9]{40}$`)
+	solanaWalletAddressRegex = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{32,44}$`)
+)
+
+var (
+	ErrEVMWalletAddressConflict    = errors.New("evm wallet address already linked to another account")
+	ErrSolanaWalletAddressConflict = errors.New("solana wallet address already linked to another account")
+	ErrInvalidEVMWalletAddress     = errors.New("invalid evm wallet address")
+	ErrInvalidSolanaWalletAddress  = errors.New("invalid solana wallet address")
+)
+
 // Account represents a Stronghold account
 type Account struct {
-	ID            uuid.UUID      `json:"id"`
-	AccountNumber string         `json:"account_number"`
-	WalletAddress *string        `json:"wallet_address,omitempty"`
-	BalanceUSDC   float64        `json:"balance_usdc"`
-	Status        AccountStatus  `json:"status"`
-	WalletEscrow  bool           `json:"wallet_escrow_enabled"`
-	TOTPEnabled   bool           `json:"totp_enabled"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	LastLoginAt   *time.Time     `json:"last_login_at,omitempty"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
+	ID                  uuid.UUID      `json:"id"`
+	AccountNumber       string         `json:"account_number"`
+	EVMWalletAddress    *string        `json:"evm_wallet_address,omitempty"`
+	SolanaWalletAddress *string        `json:"solana_wallet_address,omitempty"`
+	BalanceUSDC         float64        `json:"balance_usdc"`
+	Status              AccountStatus  `json:"status"`
+	WalletEscrow        bool           `json:"wallet_escrow_enabled"`
+	TOTPEnabled         bool           `json:"totp_enabled"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	LastLoginAt         *time.Time     `json:"last_login_at,omitempty"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
 	// Encrypted wallet key fields - never exposed via JSON
 	EncryptedPrivateKey *string    `json:"-"`
 	KMSKeyID            *string    `json:"-"`
@@ -57,7 +72,7 @@ func GenerateAccountNumber() (string, error) {
 }
 
 // CreateAccount creates a new account with a generated account number
-func (db *DB) CreateAccount(ctx context.Context, walletAddress *string) (*Account, error) {
+func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solanaWalletAddress *string) (*Account, error) {
 	// Generate unique account number
 	var accountNumber string
 	var err error
@@ -91,21 +106,22 @@ func (db *DB) CreateAccount(ctx context.Context, walletAddress *string) (*Accoun
 
 	// Insert the new account
 	account := &Account{
-		ID:            uuid.New(),
-		AccountNumber: accountNumber,
-		WalletAddress: walletAddress,
-		BalanceUSDC:   0,
-		Status:        AccountStatusActive,
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
-		Metadata:      make(map[string]any),
+		ID:                  uuid.New(),
+		AccountNumber:       accountNumber,
+		EVMWalletAddress:    evmWalletAddress,
+		SolanaWalletAddress: solanaWalletAddress,
+		BalanceUSDC:         0,
+		Status:              AccountStatusActive,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+		Metadata:            make(map[string]any),
 	}
 
 	_, err = db.pool.Exec(ctx, `
-		INSERT INTO accounts (id, account_number, wallet_address, balance_usdc, status, created_at, updated_at, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, account.ID, account.AccountNumber, account.WalletAddress, account.BalanceUSDC,
-		account.Status, account.CreatedAt, account.UpdatedAt, account.Metadata)
+		INSERT INTO accounts (id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status, created_at, updated_at, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, account.ID, account.AccountNumber, account.EVMWalletAddress, account.SolanaWalletAddress,
+		account.BalanceUSDC, account.Status, account.CreatedAt, account.UpdatedAt, account.Metadata)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account: %w", err)
@@ -118,13 +134,13 @@ func (db *DB) CreateAccount(ctx context.Context, walletAddress *string) (*Accoun
 func (db *DB) GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error) {
 	account := &Account{}
 	err := db.QueryRow(ctx, `
-		SELECT id, account_number, wallet_address, balance_usdc, status,
+		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
 		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
 		WHERE id = $1
 	`, id).Scan(
-		&account.ID, &account.AccountNumber, &account.WalletAddress,
+		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
 		&account.BalanceUSDC, &account.Status,
 		&account.WalletEscrow, &account.TOTPEnabled,
 		&account.CreatedAt,
@@ -148,13 +164,13 @@ func (db *DB) GetAccountByNumber(ctx context.Context, accountNumber string) (*Ac
 
 	account := &Account{}
 	err := db.QueryRow(ctx, `
-		SELECT id, account_number, wallet_address, balance_usdc, status,
+		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
 		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
 		WHERE account_number = $1
 	`, normalized).Scan(
-		&account.ID, &account.AccountNumber, &account.WalletAddress,
+		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
 		&account.BalanceUSDC, &account.Status,
 		&account.WalletEscrow, &account.TOTPEnabled,
 		&account.CreatedAt,
@@ -171,17 +187,53 @@ func (db *DB) GetAccountByNumber(ctx context.Context, accountNumber string) (*Ac
 	return account, nil
 }
 
-// GetAccountByWalletAddress retrieves an account by its wallet address
+// GetAccountByWalletAddress retrieves an account by wallet address, auto-detecting chain by format.
+// EVM addresses start with "0x", everything else is treated as Solana.
 func (db *DB) GetAccountByWalletAddress(ctx context.Context, walletAddress string) (*Account, error) {
+	if strings.HasPrefix(walletAddress, "0x") {
+		return db.GetAccountByEVMWallet(ctx, walletAddress)
+	}
+	return db.GetAccountBySolanaWallet(ctx, walletAddress)
+}
+
+// GetAccountByEVMWallet retrieves an account by its EVM wallet address
+func (db *DB) GetAccountByEVMWallet(ctx context.Context, evmAddress string) (*Account, error) {
 	account := &Account{}
 	err := db.QueryRow(ctx, `
-		SELECT id, account_number, wallet_address, balance_usdc, status,
+		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
 		       wallet_escrow_enabled, totp_enabled,
 		       created_at, updated_at, last_login_at, metadata
 		FROM accounts
-		WHERE wallet_address = $1
-	`, walletAddress).Scan(
-		&account.ID, &account.AccountNumber, &account.WalletAddress,
+		WHERE evm_wallet_address = $1
+	`, evmAddress).Scan(
+		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
+		&account.BalanceUSDC, &account.Status,
+		&account.WalletEscrow, &account.TOTPEnabled,
+		&account.CreatedAt,
+		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("account not found")
+		}
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	return account, nil
+}
+
+// GetAccountBySolanaWallet retrieves an account by its Solana wallet address
+func (db *DB) GetAccountBySolanaWallet(ctx context.Context, solanaAddress string) (*Account, error) {
+	account := &Account{}
+	err := db.QueryRow(ctx, `
+		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
+		       wallet_escrow_enabled, totp_enabled,
+		       created_at, updated_at, last_login_at, metadata
+		FROM accounts
+		WHERE solana_wallet_address = $1
+	`, solanaAddress).Scan(
+		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
 		&account.BalanceUSDC, &account.Status,
 		&account.WalletEscrow, &account.TOTPEnabled,
 		&account.CreatedAt,
@@ -204,9 +256,9 @@ func (db *DB) UpdateAccount(ctx context.Context, account *Account) error {
 
 	_, err := db.pool.Exec(ctx, `
 		UPDATE accounts
-		SET wallet_address = $1, status = $2, updated_at = $3, metadata = $4
-		WHERE id = $5
-	`, account.WalletAddress, account.Status, account.UpdatedAt,
+		SET evm_wallet_address = $1, solana_wallet_address = $2, status = $3, updated_at = $4, metadata = $5
+		WHERE id = $6
+	`, account.EVMWalletAddress, account.SolanaWalletAddress, account.Status, account.UpdatedAt,
 		account.Metadata, account.ID)
 
 	if err != nil {
@@ -232,13 +284,22 @@ func (db *DB) UpdateLastLogin(ctx context.Context, accountID uuid.UUID) error {
 	return nil
 }
 
-// LinkWallet links a wallet address to an account
+// LinkWallet links a wallet address to an account, auto-detecting chain by address format.
+// EVM addresses start with "0x", everything else is treated as Solana.
 func (db *DB) LinkWallet(ctx context.Context, accountID uuid.UUID, walletAddress string) error {
+	if strings.HasPrefix(walletAddress, "0x") {
+		return db.LinkEVMWallet(ctx, accountID, walletAddress)
+	}
+	return db.LinkSolanaWallet(ctx, accountID, walletAddress)
+}
+
+// LinkEVMWallet links an EVM wallet address to an account
+func (db *DB) LinkEVMWallet(ctx context.Context, accountID uuid.UUID, evmAddress string) error {
 	// Check if wallet is already linked to another account
 	var existingAccountID uuid.UUID
 	err := db.QueryRow(ctx, `
-		SELECT id FROM accounts WHERE wallet_address = $1
-	`, walletAddress).Scan(&existingAccountID)
+		SELECT id FROM accounts WHERE evm_wallet_address = $1
+	`, evmAddress).Scan(&existingAccountID)
 
 	if err == nil && existingAccountID != accountID {
 		return errors.New("wallet address already linked to another account")
@@ -246,9 +307,34 @@ func (db *DB) LinkWallet(ctx context.Context, accountID uuid.UUID, walletAddress
 
 	_, err = db.pool.Exec(ctx, `
 		UPDATE accounts
-		SET wallet_address = $1, updated_at = $2
+		SET evm_wallet_address = $1, updated_at = $2
 		WHERE id = $3
-	`, walletAddress, time.Now().UTC(), accountID)
+	`, evmAddress, time.Now().UTC(), accountID)
+
+	if err != nil {
+		return fmt.Errorf("failed to link wallet: %w", err)
+	}
+
+	return nil
+}
+
+// LinkSolanaWallet links a Solana wallet address to an account
+func (db *DB) LinkSolanaWallet(ctx context.Context, accountID uuid.UUID, solanaAddress string) error {
+	// Check if wallet is already linked to another account
+	var existingAccountID uuid.UUID
+	err := db.QueryRow(ctx, `
+		SELECT id FROM accounts WHERE solana_wallet_address = $1
+	`, solanaAddress).Scan(&existingAccountID)
+
+	if err == nil && existingAccountID != accountID {
+		return errors.New("wallet address already linked to another account")
+	}
+
+	_, err = db.pool.Exec(ctx, `
+		UPDATE accounts
+		SET solana_wallet_address = $1, updated_at = $2
+		WHERE id = $3
+	`, solanaAddress, time.Now().UTC(), accountID)
 
 	if err != nil {
 		return fmt.Errorf("failed to link wallet: %w", err)
@@ -393,16 +479,131 @@ func (db *DB) HasEncryptedKey(ctx context.Context, accountID uuid.UUID) (bool, e
 	return hasKey, nil
 }
 
-// UpdateWalletAddress updates the wallet address for an account
+// UpdateWalletAddress updates the wallet address for an account, auto-detecting chain by format.
+// EVM addresses start with "0x", everything else is treated as Solana.
 func (db *DB) UpdateWalletAddress(ctx context.Context, accountID uuid.UUID, walletAddress string) error {
-	_, err := db.pool.Exec(ctx, `
+	var column string
+	if strings.HasPrefix(walletAddress, "0x") {
+		column = "evm_wallet_address"
+	} else {
+		column = "solana_wallet_address"
+	}
+
+	_, err := db.pool.Exec(ctx, fmt.Sprintf(`
 		UPDATE accounts
-		SET wallet_address = $1, updated_at = $2
+		SET %s = $1, updated_at = $2
 		WHERE id = $3
-	`, walletAddress, time.Now().UTC(), accountID)
+	`, column), walletAddress, time.Now().UTC(), accountID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update wallet address: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateWalletAddresses updates both EVM and Solana wallet addresses for an account.
+// Pass nil for either address to leave that field unchanged.
+func (db *DB) UpdateWalletAddresses(ctx context.Context, accountID uuid.UUID, evmAddr *string, solanaAddr *string) error {
+	if evmAddr != nil {
+		normalizedEVM := strings.TrimSpace(*evmAddr)
+		if normalizedEVM == "" || !evmWalletAddressRegex.MatchString(normalizedEVM) {
+			return ErrInvalidEVMWalletAddress
+		}
+		evmAddr = &normalizedEVM
+	}
+
+	if solanaAddr != nil {
+		normalizedSolana := strings.TrimSpace(*solanaAddr)
+		if normalizedSolana == "" || !solanaWalletAddressRegex.MatchString(normalizedSolana) {
+			return ErrInvalidSolanaWalletAddress
+		}
+		solanaAddr = &normalizedSolana
+	}
+
+	// Check if EVM address is already linked to another account
+	if evmAddr != nil {
+		var existingAccountID uuid.UUID
+		err := db.QueryRow(ctx, `
+			SELECT id FROM accounts WHERE evm_wallet_address = $1
+		`, *evmAddr).Scan(&existingAccountID)
+
+		if err == nil {
+			if existingAccountID != accountID {
+				return ErrEVMWalletAddressConflict
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("failed to check evm wallet address ownership: %w", err)
+		}
+	}
+
+	// Check if Solana address is already linked to another account
+	if solanaAddr != nil {
+		var existingAccountID uuid.UUID
+		err := db.QueryRow(ctx, `
+			SELECT id FROM accounts WHERE solana_wallet_address = $1
+		`, *solanaAddr).Scan(&existingAccountID)
+
+		if err == nil {
+			if existingAccountID != accountID {
+				return ErrSolanaWalletAddressConflict
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("failed to check solana wallet address ownership: %w", err)
+		}
+	}
+
+	// Build SET clauses dynamically based on which addresses are provided
+	setClauses := []string{}
+	args := []interface{}{}
+	argIdx := 1
+
+	if evmAddr != nil {
+		setClauses = append(setClauses, fmt.Sprintf("evm_wallet_address = $%d", argIdx))
+		args = append(args, *evmAddr)
+		argIdx++
+	}
+
+	if solanaAddr != nil {
+		setClauses = append(setClauses, fmt.Sprintf("solana_wallet_address = $%d", argIdx))
+		args = append(args, *solanaAddr)
+		argIdx++
+	}
+
+	if len(setClauses) == 0 {
+		return nil // Nothing to update
+	}
+
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
+	args = append(args, time.Now().UTC())
+	argIdx++
+
+	args = append(args, accountID)
+	query := fmt.Sprintf("UPDATE accounts SET %s WHERE id = $%d",
+		strings.Join(setClauses, ", "), argIdx)
+
+	_, err := db.pool.Exec(ctx, query, args...)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505":
+				if strings.Contains(pgErr.ConstraintName, "accounts_evm_wallet_address_unique") {
+					return ErrEVMWalletAddressConflict
+				}
+				if strings.Contains(pgErr.ConstraintName, "accounts_solana_wallet_address_unique") {
+					return ErrSolanaWalletAddressConflict
+				}
+			case "23514":
+				if strings.Contains(pgErr.ConstraintName, "valid_evm_wallet_address") {
+					return ErrInvalidEVMWalletAddress
+				}
+				if strings.Contains(pgErr.ConstraintName, "valid_solana_wallet_address") {
+					return ErrInvalidSolanaWalletAddress
+				}
+			}
+		}
+		return fmt.Errorf("failed to update wallet addresses: %w", err)
 	}
 
 	return nil

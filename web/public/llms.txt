@@ -47,6 +47,9 @@ sudo stronghold enable
 
 # Check status
 stronghold status
+
+# Check API and RPC health
+stronghold health
 ```
 
 ### CLI Commands
@@ -59,10 +62,14 @@ stronghold status
 | stronghold enable          | Start proxy, enable interception                      |
 | stronghold disable         | Stop proxy, restore direct access                     |
 | stronghold status          | Show proxy status and statistics                      |
+| stronghold health          | Check API and Base/Solana RPC health                  |
 | stronghold account balance | Check balance (Base and Solana wallets)               |
 | stronghold account deposit | Show deposit addresses (Base and Solana)              |
+| stronghold wallet list     | List configured wallet addresses by chain             |
+| stronghold wallet balance  | Show per-chain wallet balances                        |
 | stronghold wallet export   | Export private keys for backup (both chains)          |
-| stronghold wallet replace  | Replace wallet (use --chain base or --chain solana)   |
+| stronghold wallet replace  | Replace wallet (`replace evm` or `replace solana`)     |
+| stronghold wallet link     | Register wallet addresses with the server             |
 | stronghold config get      | Get configuration value                               |
 | stronghold config set      | Set configuration value                               |
 
@@ -82,15 +89,19 @@ stronghold init --yes --solana-private-key <base58-solana-key>
 ### Wallet Replace
 
 ```bash
+# List configured wallets and balances
+stronghold wallet list
+stronghold wallet balance
+
 # Replace Base (EVM) wallet
-stronghold wallet replace --chain base
+stronghold wallet replace evm
 
 # Replace Solana wallet
-stronghold wallet replace --chain solana
+stronghold wallet replace solana
 
 # Non-interactive with env var
-STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace --yes
-STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace --chain solana --yes
+STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace evm --yes
+STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace solana --yes
 ```
 
 ### Response Headers for Agentic Integration

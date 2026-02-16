@@ -55,12 +55,13 @@ type LoginRequest struct {
 
 // LoginResponse represents the login response
 type LoginResponse struct {
-	AccountNumber string  `json:"account_number"`
-	ExpiresAt     string  `json:"expires_at"`
-	WalletAddress *string `json:"wallet_address,omitempty"`
-	TOTPRequired  bool    `json:"totp_required"`
-	DeviceTrusted bool    `json:"device_trusted"`
-	EscrowEnabled bool    `json:"wallet_escrow_enabled"`
+	AccountNumber       string  `json:"account_number"`
+	ExpiresAt           string  `json:"expires_at"`
+	EVMWalletAddress    *string `json:"evm_wallet_address,omitempty"`
+	SolanaWalletAddress *string `json:"solana_wallet_address,omitempty"`
+	TOTPRequired        bool    `json:"totp_required"`
+	DeviceTrusted       bool    `json:"device_trusted"`
+	EscrowEnabled       bool    `json:"wallet_escrow_enabled"`
 }
 
 // GetWalletKeyResponse represents the response from the wallet-key endpoint
@@ -230,4 +231,43 @@ type UpdateWalletRequest struct {
 func (c *APIClient) UpdateWallet(privateKey string) error {
 	req := UpdateWalletRequest{PrivateKey: privateKey}
 	return c.doRequest(http.MethodPut, "/v1/auth/wallet", http.StatusOK, req, nil)
+}
+
+// UpdateWalletAddressesRequest represents a request to register wallet public keys with the server
+type UpdateWalletAddressesRequest struct {
+	EVMAddress    *string `json:"evm_address,omitempty"`
+	SolanaAddress *string `json:"solana_address,omitempty"`
+}
+
+// UpdateWalletAddressesResponse represents the response from registering wallet public keys
+type UpdateWalletAddressesResponse struct {
+	EVMWalletAddress    *string `json:"evm_wallet_address,omitempty"`
+	SolanaWalletAddress *string `json:"solana_wallet_address,omitempty"`
+}
+
+// UpdateWalletAddresses registers wallet public key addresses with the server
+func (c *APIClient) UpdateWalletAddresses(req *UpdateWalletAddressesRequest) (*UpdateWalletAddressesResponse, error) {
+	var result UpdateWalletAddressesResponse
+	if err := c.doRequest(http.MethodPut, "/v1/account/wallets", http.StatusOK, req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RegisterWalletAddresses is a convenience wrapper that registers wallet public key
+// addresses with the server. Empty strings are skipped. Returns nil if no addresses
+// are provided or if registration succeeds.
+func (c *APIClient) RegisterWalletAddresses(evmAddr, solanaAddr string) error {
+	req := &UpdateWalletAddressesRequest{}
+	if evmAddr != "" {
+		req.EVMAddress = &evmAddr
+	}
+	if solanaAddr != "" {
+		req.SolanaAddress = &solanaAddr
+	}
+	if req.EVMAddress == nil && req.SolanaAddress == nil {
+		return nil
+	}
+	_, err := c.UpdateWalletAddresses(req)
+	return err
 }

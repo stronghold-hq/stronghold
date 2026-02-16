@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestCreateAccount_GeneratesUniqueNumber(t *testing.T) {
 	numberSet := make(map[string]bool)
 
 	for i := 0; i < 5; i++ {
-		account, err := db.CreateAccount(ctx, nil)
+		account, err := db.CreateAccount(ctx, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, account)
 
@@ -48,7 +49,7 @@ func TestCreateAccount_GeneratesUniqueNumber(t *testing.T) {
 	}
 }
 
-func TestCreateAccount_WithWallet(t *testing.T) {
+func TestCreateAccount_WithEVMWallet(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
 
@@ -57,32 +58,63 @@ func TestCreateAccount_WithWallet(t *testing.T) {
 
 	t.Run("valid Ethereum address", func(t *testing.T) {
 		wallet := "0x1234567890abcdef1234567890abcdef12345678"
-		account, err := db.CreateAccount(ctx, &wallet)
+		account, err := db.CreateAccount(ctx, &wallet, nil)
 		require.NoError(t, err)
 		require.NotNil(t, account)
-		require.NotNil(t, account.WalletAddress)
-		assert.Equal(t, wallet, *account.WalletAddress)
+		require.NotNil(t, account.EVMWalletAddress)
+		assert.Equal(t, wallet, *account.EVMWalletAddress)
+		assert.Nil(t, account.SolanaWalletAddress)
 	})
 
 	t.Run("uppercase hex digits valid", func(t *testing.T) {
 		wallet := "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
-		account, err := db.CreateAccount(ctx, &wallet)
+		account, err := db.CreateAccount(ctx, &wallet, nil)
 		require.NoError(t, err)
-		require.NotNil(t, account.WalletAddress)
-		assert.Equal(t, wallet, *account.WalletAddress)
+		require.NotNil(t, account.EVMWalletAddress)
+		assert.Equal(t, wallet, *account.EVMWalletAddress)
 	})
 
 	t.Run("mixed case valid", func(t *testing.T) {
 		wallet := "0xAbCdEf1234567890AbCdEf1234567890AbCdEf12"
-		account, err := db.CreateAccount(ctx, &wallet)
+		account, err := db.CreateAccount(ctx, &wallet, nil)
 		require.NoError(t, err)
-		require.NotNil(t, account.WalletAddress)
+		require.NotNil(t, account.EVMWalletAddress)
 	})
 
 	t.Run("nil wallet creates account without wallet", func(t *testing.T) {
-		account, err := db.CreateAccount(ctx, nil)
+		account, err := db.CreateAccount(ctx, nil, nil)
 		require.NoError(t, err)
-		assert.Nil(t, account.WalletAddress)
+		assert.Nil(t, account.EVMWalletAddress)
+		assert.Nil(t, account.SolanaWalletAddress)
+	})
+}
+
+func TestCreateAccount_WithSolanaWallet(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	t.Run("valid Solana address", func(t *testing.T) {
+		wallet := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+		account, err := db.CreateAccount(ctx, nil, &wallet)
+		require.NoError(t, err)
+		require.NotNil(t, account)
+		require.NotNil(t, account.SolanaWalletAddress)
+		assert.Equal(t, wallet, *account.SolanaWalletAddress)
+		assert.Nil(t, account.EVMWalletAddress)
+	})
+
+	t.Run("both wallets", func(t *testing.T) {
+		evmWallet := "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+		solWallet := "4fYNw3dojWmQ4dXtSGE9epjRGy9pFSx62YypT7avPYvA"
+		account, err := db.CreateAccount(ctx, &evmWallet, &solWallet)
+		require.NoError(t, err)
+		require.NotNil(t, account.EVMWalletAddress)
+		require.NotNil(t, account.SolanaWalletAddress)
+		assert.Equal(t, evmWallet, *account.EVMWalletAddress)
+		assert.Equal(t, solWallet, *account.SolanaWalletAddress)
 	})
 }
 
@@ -94,7 +126,7 @@ func TestGetAccountByNumber_Normalized(t *testing.T) {
 	ctx := context.Background()
 
 	// Create an account
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Get the raw 16 digits without dashes
@@ -126,32 +158,60 @@ func TestGetAccountByNumber_Normalized(t *testing.T) {
 	}
 }
 
-func TestLinkWallet_RejectsAlreadyLinked(t *testing.T) {
+func TestLinkWallet_EVM_RejectsAlreadyLinked(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
 
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	// Create first account with wallet
+	// Create first account with EVM wallet
 	wallet := "0x1234567890abcdef1234567890abcdef12345678"
-	account1, err := db.CreateAccount(ctx, &wallet)
+	account1, err := db.CreateAccount(ctx, &wallet, nil)
 	require.NoError(t, err)
 
 	// Create second account without wallet
-	account2, err := db.CreateAccount(ctx, nil)
+	account2, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Try to link the same wallet to second account - should fail
-	err = db.LinkWallet(ctx, account2.ID, wallet)
+	err = db.LinkEVMWallet(ctx, account2.ID, wallet)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already linked to another account")
 
 	// Verify first account still has the wallet
 	found, err := db.GetAccountByID(ctx, account1.ID)
 	require.NoError(t, err)
-	require.NotNil(t, found.WalletAddress)
-	assert.Equal(t, wallet, *found.WalletAddress)
+	require.NotNil(t, found.EVMWalletAddress)
+	assert.Equal(t, wallet, *found.EVMWalletAddress)
+}
+
+func TestLinkWallet_Solana_RejectsAlreadyLinked(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	// Create first account with Solana wallet
+	wallet := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+	account1, err := db.CreateAccount(ctx, nil, &wallet)
+	require.NoError(t, err)
+
+	// Create second account without wallet
+	account2, err := db.CreateAccount(ctx, nil, nil)
+	require.NoError(t, err)
+
+	// Try to link the same wallet to second account - should fail
+	err = db.LinkSolanaWallet(ctx, account2.ID, wallet)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already linked to another account")
+
+	// Verify first account still has the wallet
+	found, err := db.GetAccountByID(ctx, account1.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.SolanaWalletAddress)
+	assert.Equal(t, wallet, *found.SolanaWalletAddress)
 }
 
 func TestLinkWallet_AllowsRelinking(t *testing.T) {
@@ -162,23 +222,54 @@ func TestLinkWallet_AllowsRelinking(t *testing.T) {
 	ctx := context.Background()
 
 	// Create account without wallet
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
-	// Link first wallet
+	// Link EVM wallet
 	wallet1 := "0x1111111111111111111111111111111111111111"
-	err = db.LinkWallet(ctx, account.ID, wallet1)
+	err = db.LinkEVMWallet(ctx, account.ID, wallet1)
 	require.NoError(t, err)
 
 	// Verify link
 	found, err := db.GetAccountByID(ctx, account.ID)
 	require.NoError(t, err)
-	require.NotNil(t, found.WalletAddress)
-	assert.Equal(t, wallet1, *found.WalletAddress)
+	require.NotNil(t, found.EVMWalletAddress)
+	assert.Equal(t, wallet1, *found.EVMWalletAddress)
 
 	// Link same wallet again (should succeed - same account)
-	err = db.LinkWallet(ctx, account.ID, wallet1)
+	err = db.LinkEVMWallet(ctx, account.ID, wallet1)
 	require.NoError(t, err)
+}
+
+func TestLinkWallet_AutoDetectsChain(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	account, err := db.CreateAccount(ctx, nil, nil)
+	require.NoError(t, err)
+
+	// LinkWallet with 0x prefix should go to EVM
+	evmAddr := "0x2222222222222222222222222222222222222222"
+	err = db.LinkWallet(ctx, account.ID, evmAddr)
+	require.NoError(t, err)
+
+	found, err := db.GetAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.EVMWalletAddress)
+	assert.Equal(t, evmAddr, *found.EVMWalletAddress)
+
+	// LinkWallet without 0x prefix should go to Solana
+	solAddr := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+	err = db.LinkWallet(ctx, account.ID, solAddr)
+	require.NoError(t, err)
+
+	found, err = db.GetAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.SolanaWalletAddress)
+	assert.Equal(t, solAddr, *found.SolanaWalletAddress)
 }
 
 func TestLinkWallet_InvalidFormat(t *testing.T) {
@@ -188,29 +279,28 @@ func TestLinkWallet_InvalidFormat(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	invalidAddresses := []struct {
 		name    string
 		address string
 	}{
-		{"too short", "0x1234"},
-		{"too long", "0x1234567890abcdef1234567890abcdef123456789"},
-		{"missing 0x prefix", "1234567890abcdef1234567890abcdef12345678"},
-		{"invalid chars", "0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"},
+		{"too short EVM", "0x1234"},
+		{"too long EVM", "0x1234567890abcdef1234567890abcdef123456789"},
+		{"invalid chars EVM", "0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"},
 	}
 
 	for _, tc := range invalidAddresses {
 		t.Run(tc.name, func(t *testing.T) {
-			err := db.LinkWallet(ctx, account.ID, tc.address)
+			err := db.LinkEVMWallet(ctx, account.ID, tc.address)
 			// Database constraint should reject invalid format
 			require.Error(t, err)
 		})
 	}
 }
 
-func TestGetAccountByWalletAddress(t *testing.T) {
+func TestGetAccountByEVMWallet(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
 
@@ -218,13 +308,111 @@ func TestGetAccountByWalletAddress(t *testing.T) {
 	ctx := context.Background()
 
 	wallet := "0xabcdef1234567890abcdef1234567890abcdef12"
-	account, err := db.CreateAccount(ctx, &wallet)
+	account, err := db.CreateAccount(ctx, &wallet, nil)
 	require.NoError(t, err)
 
-	// Find by wallet
-	found, err := db.GetAccountByWalletAddress(ctx, wallet)
+	// Find by EVM wallet
+	found, err := db.GetAccountByEVMWallet(ctx, wallet)
 	require.NoError(t, err)
 	assert.Equal(t, account.ID, found.ID)
+
+	// Also test via auto-detect
+	found, err = db.GetAccountByWalletAddress(ctx, wallet)
+	require.NoError(t, err)
+	assert.Equal(t, account.ID, found.ID)
+}
+
+func TestGetAccountBySolanaWallet(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	wallet := "4fYNw3dojWmQ4dXtSGE9epjRGy9pFSx62YypT7avPYvA"
+	account, err := db.CreateAccount(ctx, nil, &wallet)
+	require.NoError(t, err)
+
+	// Find by Solana wallet
+	found, err := db.GetAccountBySolanaWallet(ctx, wallet)
+	require.NoError(t, err)
+	assert.Equal(t, account.ID, found.ID)
+
+	// Also test via auto-detect
+	found, err = db.GetAccountByWalletAddress(ctx, wallet)
+	require.NoError(t, err)
+	assert.Equal(t, account.ID, found.ID)
+}
+
+func TestUpdateWalletAddresses(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	account, err := db.CreateAccount(ctx, nil, nil)
+	require.NoError(t, err)
+
+	t.Run("update EVM only", func(t *testing.T) {
+		evmAddr := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		err := db.UpdateWalletAddresses(ctx, account.ID, &evmAddr, nil)
+		require.NoError(t, err)
+
+		found, err := db.GetAccountByID(ctx, account.ID)
+		require.NoError(t, err)
+		require.NotNil(t, found.EVMWalletAddress)
+		assert.Equal(t, evmAddr, *found.EVMWalletAddress)
+		assert.Nil(t, found.SolanaWalletAddress)
+	})
+
+	t.Run("update Solana only", func(t *testing.T) {
+		solAddr := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+		err := db.UpdateWalletAddresses(ctx, account.ID, nil, &solAddr)
+		require.NoError(t, err)
+
+		found, err := db.GetAccountByID(ctx, account.ID)
+		require.NoError(t, err)
+		require.NotNil(t, found.EVMWalletAddress) // Should still be set from previous subtest
+		require.NotNil(t, found.SolanaWalletAddress)
+		assert.Equal(t, solAddr, *found.SolanaWalletAddress)
+	})
+
+	t.Run("update both", func(t *testing.T) {
+		evmAddr := "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		solAddr := "4fYNw3dojWmQ4dXtSGE9epjRGy9pFSx62YypT7avPYvA"
+		err := db.UpdateWalletAddresses(ctx, account.ID, &evmAddr, &solAddr)
+		require.NoError(t, err)
+
+		found, err := db.GetAccountByID(ctx, account.ID)
+		require.NoError(t, err)
+		require.NotNil(t, found.EVMWalletAddress)
+		require.NotNil(t, found.SolanaWalletAddress)
+		assert.Equal(t, evmAddr, *found.EVMWalletAddress)
+		assert.Equal(t, solAddr, *found.SolanaWalletAddress)
+	})
+
+	t.Run("nil both is no-op", func(t *testing.T) {
+		err := db.UpdateWalletAddresses(ctx, account.ID, nil, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("returns conflict error when EVM is already linked", func(t *testing.T) {
+		occupiedEVM := "0x1234567890abcdef1234567890abcdef12345678"
+		_, err := db.CreateAccount(ctx, &occupiedEVM, nil)
+		require.NoError(t, err)
+
+		err = db.UpdateWalletAddresses(ctx, account.ID, &occupiedEVM, nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrEVMWalletAddressConflict))
+	})
+
+	t.Run("returns validation error for empty EVM input", func(t *testing.T) {
+		empty := "   "
+		err := db.UpdateWalletAddresses(ctx, account.ID, &empty, nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrInvalidEVMWalletAddress))
+	})
 }
 
 func TestAccountStatus(t *testing.T) {
@@ -234,7 +422,7 @@ func TestAccountStatus(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, AccountStatusActive, account.Status)
 
@@ -264,7 +452,7 @@ func TestUpdateBalance(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, account.BalanceUSDC)
 
@@ -284,7 +472,7 @@ func TestAccountExists(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Should exist
@@ -305,7 +493,7 @@ func TestUpdateLastLogin(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, account.LastLoginAt)
 

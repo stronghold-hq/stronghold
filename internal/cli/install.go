@@ -43,17 +43,17 @@ type InstallModel struct {
 	confirmWarning bool
 
 	// Account step
-	accountChoice            int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
-	accountNumber            string
-	walletAddress            string
-	authToken                string
-	loggedIn                 bool
-	importKeyInput           textinput.Model
-	importSolanaKeyInput     textinput.Model
-	loginInput               textinput.Model
-	awaitingKeyInput         bool
-	awaitingSolanaKeyInput   bool
-	awaitingLoginInput       bool
+	accountChoice          int // 0 = create, 1 = create with existing wallet, 2 = existing account, 3 = skip
+	accountNumber          string
+	walletAddress          string
+	authToken              string
+	loggedIn               bool
+	importKeyInput         textinput.Model
+	importSolanaKeyInput   textinput.Model
+	loginInput             textinput.Model
+	awaitingKeyInput       bool
+	awaitingSolanaKeyInput bool
+	awaitingLoginInput     bool
 
 	// Payment step
 	paymentMethod int // 0 = stripe, 1 = wallet
@@ -334,6 +334,11 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			} else {
 				m.accountNumber = resp.AccountNumber
 				m.progress = append(m.progress, successStyle.Render("✓ Account created via API"))
+
+				// Register wallet addresses with server (best-effort)
+				if err := apiClient.RegisterWalletAddresses(m.config.Wallet.Address, m.config.Wallet.SolanaAddress); err == nil {
+					m.progress = append(m.progress, successStyle.Render("✓ Wallet addresses registered with server"))
+				}
 			}
 			m.config.Auth.AccountNumber = m.accountNumber
 			m.config.Auth.LoggedIn = true
@@ -369,14 +374,20 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if loginResp.WalletAddress != nil {
+			// Reset local wallet linkage and repopulate from server response.
+			m.config.Wallet.Address = ""
+			m.walletAddress = ""
+			m.config.Wallet.SolanaAddress = ""
+
+			evmAddr := loginResp.EVMWalletAddress
+			if evmAddr != nil {
 				if loginResp.EscrowEnabled {
 					privateKey, err := apiClient.GetWalletKey()
 					if err != nil {
 						m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet key fetch failed: %v", err)))
-						m.config.Wallet.Address = *loginResp.WalletAddress
+						m.config.Wallet.Address = *evmAddr
 						m.config.Wallet.Network = DefaultBlockchain
-						m.walletAddress = *loginResp.WalletAddress
+						m.walletAddress = *evmAddr
 					} else {
 						userID := generateUserID()
 						m.config.Auth.UserID = userID
@@ -393,12 +404,27 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 						}
 					}
 				} else {
-					m.config.Wallet.Address = *loginResp.WalletAddress
+					m.config.Wallet.Address = *evmAddr
 					m.config.Wallet.Network = DefaultBlockchain
-					m.walletAddress = *loginResp.WalletAddress
+					m.walletAddress = *evmAddr
 					m.progress = append(m.progress, warningStyle.Render("⚠ Wallet not stored on server. Import locally to enable payments."))
 				}
 			}
+			if loginResp.SolanaWalletAddress != nil {
+				m.config.Wallet.SolanaAddress = *loginResp.SolanaWalletAddress
+				if m.config.Wallet.SolanaNetwork == "" {
+					m.config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+				}
+				m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Solana wallet linked: %s", *loginResp.SolanaWalletAddress)))
+			}
+
+			// Register wallet addresses with server (best-effort)
+			if err := apiClient.RegisterWalletAddresses(m.config.Wallet.Address, m.config.Wallet.SolanaAddress); err != nil {
+				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet registration: %v", err)))
+			} else if m.config.Wallet.Address != "" || m.config.Wallet.SolanaAddress != "" {
+				m.progress = append(m.progress, successStyle.Render("✓ Wallet addresses registered with server"))
+			}
+
 			m.awaitingLoginInput = false
 			m.state = StatePayment
 			return m, nil
@@ -460,6 +486,11 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				m.progress = append(m.progress, successStyle.Render("✓ Account created via API"))
 				if walletAddress == "" {
 					m.progress = append(m.progress, warningStyle.Render("⚠ Account created without a wallet. Configure a local wallet to enable payments."))
+				}
+
+				// Register wallet addresses with server (best-effort)
+				if err := apiClient.RegisterWalletAddresses(m.config.Wallet.Address, m.config.Wallet.SolanaAddress); err == nil {
+					m.progress = append(m.progress, successStyle.Render("✓ Wallet addresses registered with server"))
 				}
 			}
 
@@ -753,8 +784,9 @@ func (m *InstallModel) viewComplete() string {
 	b.WriteString(headerStyle.Render("Quick Commands:"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("  Status:    stronghold status\n"))
-	b.WriteString(fmt.Sprintf("  Wallet:    stronghold wallet show\n"))
-	b.WriteString(fmt.Sprintf("  Upload:    stronghold wallet replace  (choose upload when prompted)\n"))
+	b.WriteString(fmt.Sprintf("  Wallets:   stronghold wallet list\n"))
+	b.WriteString(fmt.Sprintf("  Balance:   stronghold wallet balance\n"))
+	b.WriteString(fmt.Sprintf("  Upload:    stronghold wallet replace evm  (choose upload when prompted)\n"))
 	b.WriteString(fmt.Sprintf("  Disable:   stronghold disable\n"))
 	b.WriteString(fmt.Sprintf("  Dashboard: https://dashboard.stronghold.security\n"))
 	b.WriteString(fmt.Sprintf("  Usage:     ~$0.001 per scanned request\n\n"))
@@ -1120,12 +1152,17 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) e
 		config.Auth.AccountNumber = loginResp.AccountNumber
 		config.Auth.LoggedIn = true
 
-		if loginResp.WalletAddress != nil {
+		// Reset local wallet linkage and repopulate from server response.
+		config.Wallet.Address = ""
+		config.Wallet.SolanaAddress = ""
+
+		evmAddr := loginResp.EVMWalletAddress
+		if evmAddr != nil {
 			if loginResp.EscrowEnabled {
 				walletKey, err := apiClient.GetWalletKey()
 				if err != nil {
 					// Fallback: use wallet address without key
-					config.Wallet.Address = *loginResp.WalletAddress
+					config.Wallet.Address = *evmAddr
 					config.Wallet.Network = DefaultBlockchain
 					fmt.Printf("⚠ Wallet key fetch failed: %v\n", err)
 				} else {
@@ -1140,12 +1177,26 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) e
 					fmt.Printf("✓ Wallet synced: %s\n", address)
 				}
 			} else {
-				config.Wallet.Address = *loginResp.WalletAddress
+				config.Wallet.Address = *evmAddr
 				config.Wallet.Network = DefaultBlockchain
 				fmt.Println("⚠ Wallet not stored on server. Import locally to enable payments.")
 			}
 		}
+		if loginResp.SolanaWalletAddress != nil {
+			config.Wallet.SolanaAddress = *loginResp.SolanaWalletAddress
+			if config.Wallet.SolanaNetwork == "" {
+				config.Wallet.SolanaNetwork = DefaultSolanaNetwork
+			}
+			fmt.Printf("✓ Solana wallet linked: %s\n", *loginResp.SolanaWalletAddress)
+		}
 		fmt.Printf("✓ Logged in as %s\n", loginResp.AccountNumber)
+
+		// Register wallet addresses with server (best-effort)
+		if err := apiClient.RegisterWalletAddresses(config.Wallet.Address, config.Wallet.SolanaAddress); err == nil {
+			if config.Wallet.Address != "" || config.Wallet.SolanaAddress != "" {
+				fmt.Println("✓ Wallet addresses registered with server")
+			}
+		}
 	} else {
 		// Create new account
 		fmt.Println("→ Creating account...")
@@ -1199,6 +1250,11 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string) e
 			config.Auth.AccountNumber = generateSimulatedAccountNumber()
 		} else {
 			config.Auth.AccountNumber = resp.AccountNumber
+
+			// Register wallet addresses with server (best-effort)
+			if err := apiClient.RegisterWalletAddresses(config.Wallet.Address, config.Wallet.SolanaAddress); err == nil {
+				fmt.Println("✓ Wallet addresses registered with server")
+			}
 		}
 		config.Auth.LoggedIn = true
 		fmt.Printf("✓ Account: %s\n", config.Auth.AccountNumber)

@@ -119,6 +119,95 @@ func TestGetAccount_ReturnsStats(t *testing.T) {
 	assert.Contains(t, stats, "total_deposited_usdc")
 }
 
+func TestGetAccount_SolanaOnly_OmitsLegacyWalletAddress(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	accountNumber, accessToken := createAuthenticatedAccount(t, app)
+
+	account, err := database.GetAccountByNumber(t.Context(), accountNumber)
+	require.NoError(t, err)
+	solanaAddr := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+	err = database.UpdateWalletAddresses(t.Context(), account.ID, nil, &solanaAddr)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/v1/account", nil)
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 200, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+
+	assert.NotContains(t, body, "wallet_address")
+	assert.Equal(t, solanaAddr, body["solana_wallet_address"])
+}
+
+func TestUpdateWallets_ReturnsConflictForAlreadyLinkedWallet(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	occupiedEVM := "0x1234567890abcdef1234567890abcdef12345678"
+	_, err := database.CreateAccount(t.Context(), &occupiedEVM, nil)
+	require.NoError(t, err)
+
+	_, accessToken := createAuthenticatedAccount(t, app)
+
+	reqBody := map[string]string{
+		"evm_address": occupiedEVM,
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("PUT", "/v1/account/wallets", bytes.NewBuffer(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 409, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+	assert.Contains(t, body["error"], "already linked")
+}
+
+func TestUpdateWallets_ReturnsBadRequestForEmptyAddress(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	_, accessToken := createAuthenticatedAccount(t, app)
+
+	reqBody := map[string]string{
+		"evm_address": "   ",
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("PUT", "/v1/account/wallets", bytes.NewBuffer(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 400, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+	assert.Contains(t, body["error"], "cannot be empty")
+}
+
 func TestGetUsageStats_DateRange(t *testing.T) {
 	app, _, _, testDB, database := setupAccountTest(t)
 	defer testDB.Close(t)
@@ -224,7 +313,7 @@ func TestInitiateDeposit_Stripe_RequiresWallet(t *testing.T) {
 	var body map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&body)
 
-	assert.Contains(t, body["error"], "link a wallet")
+	assert.Contains(t, body["error"], "wallet address before using Stripe")
 }
 
 func TestInitiateDeposit_Direct(t *testing.T) {
@@ -256,7 +345,110 @@ func TestInitiateDeposit_Direct(t *testing.T) {
 	assert.NotEmpty(t, body.DepositID)
 	assert.Equal(t, 100.00, body.AmountUSDC)
 	assert.Equal(t, "direct", body.Provider)
+	assert.Equal(t, "base", body.Network, "should default to base when network is omitted")
 	assert.Contains(t, body.Instructions, "USDC")
+	assert.Contains(t, body.Instructions, "Base")
+}
+
+func TestInitiateDeposit_Direct_Solana(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	accountNumber, accessToken := createAuthenticatedAccount(t, app)
+
+	// Link a Solana wallet
+	account, err := database.GetAccountByNumber(t.Context(), accountNumber)
+	require.NoError(t, err)
+	solAddr := "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"
+	err = database.UpdateWalletAddresses(t.Context(), account.ID, nil, &solAddr)
+	require.NoError(t, err)
+
+	reqBody := map[string]interface{}{
+		"amount_usdc": 50.00,
+		"provider":    "direct",
+		"network":     "solana",
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("POST", "/v1/account/deposit", bytes.NewBuffer(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 201, resp.StatusCode)
+
+	var body InitiateDepositResponse
+	json.NewDecoder(resp.Body).Decode(&body)
+
+	assert.NotEmpty(t, body.DepositID)
+	assert.Equal(t, 50.00, body.AmountUSDC)
+	assert.Equal(t, "direct", body.Provider)
+	assert.Equal(t, "solana", body.Network)
+	assert.Contains(t, body.Instructions, "Solana")
+	assert.Equal(t, &solAddr, body.WalletAddress)
+}
+
+func TestInitiateDeposit_InvalidNetwork(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	_, accessToken := createAuthenticatedAccount(t, app)
+
+	reqBody := map[string]interface{}{
+		"amount_usdc": 50.00,
+		"provider":    "direct",
+		"network":     "ethereum",
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("POST", "/v1/account/deposit", bytes.NewBuffer(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 400, resp.StatusCode)
+
+	var body map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&body)
+	assert.Contains(t, body["error"], "Invalid network")
+}
+
+func TestInitiateDeposit_Stripe_RequiresSolanaWallet(t *testing.T) {
+	app, _, _, testDB, database := setupAccountTest(t)
+	defer testDB.Close(t)
+	defer database.Close()
+
+	_, accessToken := createAuthenticatedAccount(t, app)
+
+	// Stripe deposit targeting Solana without linked wallet should fail
+	reqBody := map[string]interface{}{
+		"amount_usdc": 50.00,
+		"provider":    "stripe",
+		"network":     "solana",
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("POST", "/v1/account/deposit", bytes.NewBuffer(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", AccessTokenCookie+"="+accessToken)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, 400, resp.StatusCode)
+
+	var body map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&body)
+	assert.Contains(t, body["error"], "solana wallet")
 }
 
 func TestInitiateDeposit_InvalidProvider(t *testing.T) {
@@ -430,4 +622,3 @@ func TestGetAccount_WithDeposits(t *testing.T) {
 	assert.GreaterOrEqual(t, stats["total_deposits"].(float64), float64(1))
 	assert.GreaterOrEqual(t, stats["total_deposited_usdc"].(float64), float64(100))
 }
-

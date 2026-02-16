@@ -135,7 +135,7 @@ func TestStripeWebhook_FulfillmentComplete(t *testing.T) {
 	defer database.Close()
 
 	// Create an account
-	account, err := database.CreateAccount(t.Context(), nil)
+	account, err := database.CreateAccount(t.Context(), nil, nil)
 	require.NoError(t, err)
 
 	// Create a pending deposit
@@ -200,7 +200,7 @@ func TestStripeWebhook_Idempotency(t *testing.T) {
 	defer database.Close()
 
 	// Create an account
-	account, err := database.CreateAccount(t.Context(), nil)
+	account, err := database.CreateAccount(t.Context(), nil, nil)
 	require.NoError(t, err)
 
 	// Create a pending deposit
@@ -269,7 +269,7 @@ func TestStripeWebhook_Rejected(t *testing.T) {
 	defer database.Close()
 
 	// Create an account
-	account, err := database.CreateAccount(t.Context(), nil)
+	account, err := database.CreateAccount(t.Context(), nil, nil)
 	require.NoError(t, err)
 
 	// Create a pending deposit
@@ -328,7 +328,7 @@ func TestStripeWebhook_IntermediateStatus(t *testing.T) {
 	defer database.Close()
 
 	// Create an account
-	account, err := database.CreateAccount(t.Context(), nil)
+	account, err := database.CreateAccount(t.Context(), nil, nil)
 	require.NoError(t, err)
 
 	// Create a pending deposit

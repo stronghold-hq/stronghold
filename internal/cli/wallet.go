@@ -13,8 +13,8 @@ import (
 
 var (
 	accountTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#00D4AA"))
+				Bold(true).
+				Foreground(lipgloss.Color("#00D4AA"))
 
 	accountAddressStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -34,8 +34,13 @@ var (
 				Foreground(lipgloss.Color("#FF4444"))
 )
 
-// AccountBalance displays the account balance and status
+// AccountBalance displays account balances (legacy alias for wallet balance).
 func AccountBalance() error {
+	return WalletBalance()
+}
+
+// WalletBalance displays wallet balances and status by chain.
+func WalletBalance() error {
 	config, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -53,7 +58,7 @@ func AccountBalance() error {
 		return nil
 	}
 
-	fmt.Println(accountTitleStyle.Render("💳 Account"))
+	fmt.Println(accountTitleStyle.Render("💳 Wallet Balances"))
 	fmt.Println()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -105,6 +110,47 @@ func AccountBalance() error {
 			}
 		}
 		fmt.Println()
+	}
+
+	return nil
+}
+
+// WalletList displays configured wallets by chain.
+func WalletList() error {
+	config, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if !config.Auth.LoggedIn {
+		fmt.Println(accountErrorStyle.Render("✗ Not logged in"))
+		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' to set up your account"))
+		return nil
+	}
+
+	fmt.Println(accountTitleStyle.Render("🔐 Wallets"))
+	fmt.Println()
+
+	if config.Wallet.Address != "" {
+		fmt.Println("EVM (Base):")
+		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.Address))
+	} else {
+		fmt.Println("EVM (Base):")
+		fmt.Println(accountWarningStyle.Render("  Not configured"))
+	}
+	fmt.Println()
+
+	if config.Wallet.SolanaAddress != "" {
+		fmt.Println("Solana:")
+		fmt.Println(accountAddressStyle.Render("  " + config.Wallet.SolanaAddress))
+	} else {
+		fmt.Println("Solana:")
+		fmt.Println(accountWarningStyle.Render("  Not configured"))
+	}
+	fmt.Println()
+
+	if config.Wallet.Address == "" && config.Wallet.SolanaAddress == "" {
+		fmt.Println(accountInfoStyle.Render("Use 'stronghold wallet replace evm' or 'stronghold wallet replace solana' to configure wallets."))
 	}
 
 	return nil
@@ -243,6 +289,73 @@ func ImportSolanaWallet(userID string, network string, privateKeyBase58 string) 
 	}
 
 	return w.AddressString(), nil
+}
+
+// WalletLink registers locally-configured wallet public keys with the server.
+// Requires login and TOTP (trusted device).
+func WalletLink() error {
+	config, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if !config.Auth.LoggedIn || config.Auth.AccountNumber == "" {
+		fmt.Println(accountErrorStyle.Render("✗ Not logged in"))
+		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' to set up your account"))
+		return nil
+	}
+
+	evmAddr := config.Wallet.Address
+	solanaAddr := config.Wallet.SolanaAddress
+
+	if evmAddr == "" && solanaAddr == "" {
+		fmt.Println(accountWarningStyle.Render("⚠ No wallets configured locally"))
+		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' or 'stronghold wallet replace' to set up wallets"))
+		return nil
+	}
+
+	// Login to API
+	apiClient := NewAPIClient(config.API.Endpoint, config.Auth.DeviceToken)
+	loginResp, err := apiClient.Login(config.Auth.AccountNumber)
+	if err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	// Ensure trusted device (TOTP required for this endpoint)
+	if err := ensureTrustedDevice(apiClient, config, loginResp.TOTPRequired); err != nil {
+		return fmt.Errorf("TOTP verification failed: %w", err)
+	}
+
+	// Build request with locally-configured addresses
+	req := &UpdateWalletAddressesRequest{}
+	if evmAddr != "" {
+		req.EVMAddress = &evmAddr
+	}
+	if solanaAddr != "" {
+		req.SolanaAddress = &solanaAddr
+	}
+
+	resp, err := apiClient.UpdateWalletAddresses(req)
+	if err != nil {
+		return fmt.Errorf("failed to register wallet addresses: %w", err)
+	}
+
+	// Save any updated device token
+	if err := config.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	// Report results
+	fmt.Println(accountTitleStyle.Render("✓ Wallet addresses registered with server"))
+	fmt.Println()
+	if resp.EVMWalletAddress != nil {
+		fmt.Printf("  EVM:    %s\n", *resp.EVMWalletAddress)
+	}
+	if resp.SolanaWalletAddress != nil {
+		fmt.Printf("  Solana: %s\n", *resp.SolanaWalletAddress)
+	}
+
+	return nil
 }
 
 // ExportWallet exports the wallet private key to a file for backup

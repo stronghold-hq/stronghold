@@ -223,36 +223,47 @@ export default function DashboardPage() {
             transition={{ delay: 0.1 }}
             className="bg-[#111] border border-[#222] rounded-2xl p-6"
           >
-            <h3 className="text-white font-semibold mb-4">Wallet</h3>
-            {account.wallet_address ? (
-              <div>
-                <div className="text-sm text-gray-400 mb-1">
-                  Linked Address
-                </div>
-                <div className="font-mono text-white bg-[#0a0a0a] rounded-lg p-3 flex items-center justify-between gap-2">
-                  <span className="truncate">{truncateAddress(account.wallet_address)}</span>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <CopyButton text={account.wallet_address} />
-                    <span className="text-xs text-[#00D4AA] bg-[#00D4AA]/10 px-2 py-1 rounded">
-                      Base
-                    </span>
+            <h3 className="text-white font-semibold mb-4">Wallets</h3>
+            {(account.evm_wallet_address || account.solana_wallet_address) ? (
+              <div className="space-y-3">
+                {/* EVM Wallet */}
+                {account.evm_wallet_address && (
+                  <div className="font-mono text-white bg-[#0a0a0a] rounded-lg p-3 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm">{truncateAddress(account.evm_wallet_address)}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <CopyButton text={account.evm_wallet_address} />
+                      <span className="text-xs text-[#00D4AA] bg-[#00D4AA]/10 px-2 py-1 rounded">
+                        Base
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Solana Wallet */}
+                {account.solana_wallet_address && (
+                  <div className="font-mono text-white bg-[#0a0a0a] rounded-lg p-3 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm">{truncateAddress(account.solana_wallet_address)}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <CopyButton text={account.solana_wallet_address} />
+                      <span className="text-xs text-purple-400 bg-purple-400/10 px-2 py-1 rounded">
+                        Solana
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-gray-500 text-sm mt-3">
-                  <span className="text-[#00D4AA] font-medium">To fund your account:</span> Send USDC on Base network to this address. Your balance updates automatically.
+                  <span className="text-[#00D4AA] font-medium">To fund your account:</span> Send USDC to your wallet on the corresponding network.
                 </p>
               </div>
             ) : (
               <div className="text-center py-4">
                 <p className="text-gray-400 mb-3">
-                  No wallet linked to your account.
+                  No wallets linked to your account.
                 </p>
-                <a
-                  href="/dashboard/main/settings"
-                  className="text-[#00D4AA] hover:underline text-sm"
-                >
-                  Link a wallet →
-                </a>
+                <p className="text-gray-500 text-sm">
+                  Set up via CLI: <code className="text-gray-400">stronghold init</code>
+                </p>
               </div>
             )}
           </motion.div>

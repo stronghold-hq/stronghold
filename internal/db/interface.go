@@ -17,13 +17,17 @@ type Database interface {
 	Close()
 
 	// Account operations
-	CreateAccount(ctx context.Context, walletAddress *string) (*Account, error)
+	CreateAccount(ctx context.Context, evmWalletAddress *string, solanaWalletAddress *string) (*Account, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error)
 	GetAccountByNumber(ctx context.Context, accountNumber string) (*Account, error)
 	GetAccountByWalletAddress(ctx context.Context, walletAddress string) (*Account, error)
+	GetAccountByEVMWallet(ctx context.Context, evmAddress string) (*Account, error)
+	GetAccountBySolanaWallet(ctx context.Context, solanaAddress string) (*Account, error)
 	UpdateAccount(ctx context.Context, account *Account) error
 	UpdateLastLogin(ctx context.Context, accountID uuid.UUID) error
 	LinkWallet(ctx context.Context, accountID uuid.UUID, walletAddress string) error
+	LinkEVMWallet(ctx context.Context, accountID uuid.UUID, evmAddress string) error
+	LinkSolanaWallet(ctx context.Context, accountID uuid.UUID, solanaAddress string) error
 	UpdateBalance(ctx context.Context, accountID uuid.UUID, newBalance float64) error
 	SuspendAccount(ctx context.Context, accountID uuid.UUID) error
 	CloseAccount(ctx context.Context, accountID uuid.UUID) error
@@ -32,6 +36,7 @@ type Database interface {
 	GetEncryptedKey(ctx context.Context, accountID uuid.UUID) (string, error)
 	HasEncryptedKey(ctx context.Context, accountID uuid.UUID) (bool, error)
 	UpdateWalletAddress(ctx context.Context, accountID uuid.UUID, walletAddress string) error
+	UpdateWalletAddresses(ctx context.Context, accountID uuid.UUID, evmAddr *string, solanaAddr *string) error
 
 	// Session operations
 	CreateSession(ctx context.Context, accountID uuid.UUID, ipAddress net.IP, userAgent string, duration time.Duration) (*Session, string, error)

@@ -130,11 +130,15 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 | stronghold enable          | Start proxy, enable traffic interception              | Yes  |
 | stronghold disable         | Stop proxy, restore direct access                     | Yes  |
 | stronghold status          | Show proxy status and statistics                      | No   |
+| stronghold health          | Check API and Base/Solana RPC health                  | No   |
 | stronghold logs            | View proxy logs                                       | No   |
 | stronghold account balance | Check balance (Base and Solana wallets)               | No   |
 | stronghold account deposit | Show deposit addresses (Base and Solana)              | No   |
+| stronghold wallet list     | List configured wallet addresses by chain             | No   |
+| stronghold wallet balance  | Show per-chain wallet balances                        | No   |
 | stronghold wallet export   | Export private keys for backup (both chains)          | No   |
-| stronghold wallet replace  | Replace wallet (use --chain base or --chain solana)   | No   |
+| stronghold wallet replace  | Replace wallet (`replace evm` or `replace solana`)     | No   |
+| stronghold wallet link     | Register wallet addresses with the server             | No   |
 | stronghold config get      | Get configuration value                               | No   |
 | stronghold config set      | Set configuration value                               | No   |
 | stronghold uninstall       | Remove Stronghold from system                         | Yes  |
@@ -163,25 +167,46 @@ Key format differences:
 
 During interactive setup, you'll be prompted for each key separately. Press Enter to skip and auto-generate.
 
+### Wallet List and Balance
+
+```bash
+stronghold wallet list
+stronghold wallet balance
+```
+
 ### Wallet Replace
 
 Replace an existing wallet with a new private key:
 
 ```bash
 # Replace Base (EVM) wallet (default)
-stronghold wallet replace
-stronghold wallet replace --chain base
+stronghold wallet replace evm
 
 # Replace Solana wallet
-stronghold wallet replace --chain solana
+stronghold wallet replace solana
 
 # Non-interactive from env var
-STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace --yes
-STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace --chain solana --yes
+STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace evm --yes
+STRONGHOLD_SOLANA_PRIVATE_KEY=... stronghold wallet replace solana --yes
 
 # From file
-stronghold wallet replace --file /path/to/evm-key.txt
-stronghold wallet replace --chain solana --file /path/to/solana-key.txt
+stronghold wallet replace evm --file /path/to/evm-key.txt
+stronghold wallet replace solana --file /path/to/solana-key.txt
+```
+
+### Wallet Link
+
+Register locally-configured wallet public keys with the server. This links
+your Base (EVM) and/or Solana wallet addresses to your account. No private
+keys are sent -- only public addresses.
+
+This is done automatically during `stronghold init` and `stronghold wallet replace`,
+but you can use this command to manually re-register if needed.
+
+Requires TOTP verification (trusted device).
+
+```bash
+stronghold wallet link
 ```
 
 ### Config Command Usage

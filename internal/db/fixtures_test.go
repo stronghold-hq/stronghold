@@ -36,12 +36,12 @@ func NewFixtures(t *testing.T, database *DB) *Fixtures {
 	}
 }
 
-// CreateTestAccount creates a test account with optional wallet address
-func (f *Fixtures) CreateTestAccount(walletAddress *string) *TestAccount {
+// CreateTestAccount creates a test account with optional EVM wallet address
+func (f *Fixtures) CreateTestAccount(evmWalletAddress *string) *TestAccount {
 	f.t.Helper()
 
 	ctx := context.Background()
-	account, err := f.db.CreateAccount(ctx, walletAddress)
+	account, err := f.db.CreateAccount(ctx, evmWalletAddress, nil)
 	if err != nil {
 		f.t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -52,12 +52,30 @@ func (f *Fixtures) CreateTestAccount(walletAddress *string) *TestAccount {
 	}
 }
 
-// CreateTestAccountWithWallet creates a test account with a wallet address
+// CreateTestAccountWithWallet creates a test account with an EVM wallet address
 func (f *Fixtures) CreateTestAccountWithWallet() *TestAccount {
 	f.t.Helper()
 
 	wallet := "0x" + fmt.Sprintf("%040x", time.Now().UnixNano())
 	return f.CreateTestAccount(&wallet)
+}
+
+// CreateTestAccountWithSolanaWallet creates a test account with a Solana wallet address
+func (f *Fixtures) CreateTestAccountWithSolanaWallet() *TestAccount {
+	f.t.Helper()
+
+	// Use a valid base58 Solana address for testing (43 chars, valid base58)
+	solanaWallet := "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+	ctx := context.Background()
+	account, err := f.db.CreateAccount(ctx, nil, &solanaWallet)
+	if err != nil {
+		f.t.Fatalf("Failed to create test account with Solana wallet: %v", err)
+	}
+
+	return &TestAccount{
+		Account:       account,
+		AccountNumber: account.AccountNumber,
+	}
 }
 
 // CreateTestSession creates a test session for an account

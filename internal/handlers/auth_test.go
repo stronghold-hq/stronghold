@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -156,6 +157,68 @@ func TestLogin_Success(t *testing.T) {
 
 	// Verify last_login_at was updated
 	_ = handler // We'd need to query the DB to verify this
+}
+
+func TestLogin_SolanaOnlyAccount_OmitsLegacyWalletAddress(t *testing.T) {
+	app, _, testDB := setupAuthTest(t)
+	defer testDB.Close(t)
+
+	// Create account without wallets.
+	createReq := httptest.NewRequest("POST", "/v1/auth/account", bytes.NewBufferString(`{}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := app.Test(createReq)
+	require.NoError(t, err)
+
+	var createBody CreateAccountResponse
+	err = json.NewDecoder(createResp.Body).Decode(&createBody)
+	require.NoError(t, err)
+	createResp.Body.Close()
+
+	// Attach a Solana wallet only.
+	cfg := &db.Config{
+		Host:     testDB.Host,
+		Port:     testDB.Port,
+		User:     testDB.User,
+		Password: testDB.Password,
+		Name:     testDB.Database,
+		SSLMode:  "disable",
+	}
+	database, err := db.New(cfg)
+	require.NoError(t, err)
+	defer database.Close()
+
+	account, err := database.GetAccountByNumber(t.Context(), createBody.AccountNumber)
+	require.NoError(t, err)
+	solanaAddr := "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"
+	err = database.UpdateWalletAddresses(t.Context(), account.ID, nil, &solanaAddr)
+	require.NoError(t, err)
+
+	// Login and verify the response contract.
+	loginBody := map[string]string{"account_number": createBody.AccountNumber}
+	loginJSON, _ := json.Marshal(loginBody)
+	loginReq := httptest.NewRequest("POST", "/v1/auth/login", bytes.NewBuffer(loginJSON))
+	loginReq.Header.Set("Content-Type", "application/json")
+
+	loginResp, err := app.Test(loginReq)
+	require.NoError(t, err)
+	defer loginResp.Body.Close()
+	assert.Equal(t, 200, loginResp.StatusCode)
+
+	respBytes, err := io.ReadAll(loginResp.Body)
+	require.NoError(t, err)
+
+	var raw map[string]any
+	err = json.Unmarshal(respBytes, &raw)
+	require.NoError(t, err)
+	assert.NotContains(t, raw, "wallet_address")
+
+	var loginParsed LoginResponse
+	err = json.Unmarshal(respBytes, &loginParsed)
+	require.NoError(t, err)
+	assert.Nil(t, loginParsed.WalletAddress)
+	assert.Nil(t, loginParsed.EVMWalletAddress)
+	require.NotNil(t, loginParsed.SolanaWalletAddress)
+	assert.Equal(t, solanaAddr, *loginParsed.SolanaWalletAddress)
 }
 
 func TestLogin_InvalidAccount(t *testing.T) {

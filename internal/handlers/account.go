@@ -1,17 +1,22 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
+	"stronghold/internal/wallet"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -43,8 +48,8 @@ func (h *AccountHandler) RegisterRoutes(app *fiber.App, authHandler *AuthHandler
 	group.Get("/usage/stats", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetUsageStats)
 	group.Post("/deposit", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.InitiateDeposit)
 	group.Get("/deposits", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetDeposits)
-	// NOTE: Wallet linking removed - wallets are generated server-side with KMS encryption.
-	// Changing wallet requires providing the private key (via CLI only).
+	group.Put("/wallets", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.UpdateWallets)
+	group.Get("/balances", authHandler.AuthMiddleware(), authHandler.RequireTrustedDevice(), h.GetBalances)
 }
 
 // GetAccount returns the current account details
@@ -88,10 +93,11 @@ func (h *AccountHandler) GetAccount(c fiber.Ctx) error {
 		depositStats = &db.DepositStats{}
 	}
 
-	return c.JSON(fiber.Map{
+	resp := fiber.Map{
 		"id":                    account.ID,
 		"account_number":        account.AccountNumber,
-		"wallet_address":        account.WalletAddress,
+		"evm_wallet_address":    account.EVMWalletAddress,
+		"solana_wallet_address": account.SolanaWalletAddress,
 		"balance_usdc":          account.BalanceUSDC,
 		"status":                account.Status,
 		"wallet_escrow_enabled": account.WalletEscrow,
@@ -100,7 +106,12 @@ func (h *AccountHandler) GetAccount(c fiber.Ctx) error {
 		"updated_at":            account.UpdatedAt,
 		"last_login_at":         account.LastLoginAt,
 		"deposit_stats":         depositStats,
-	})
+	}
+	if account.EVMWalletAddress != nil {
+		resp["wallet_address"] = account.EVMWalletAddress
+	}
+
+	return c.JSON(resp)
 }
 
 // GetUsageRequest represents the query parameters for usage logs
@@ -243,6 +254,7 @@ func (h *AccountHandler) GetUsageStats(c fiber.Ctx) error {
 type InitiateDepositRequest struct {
 	AmountUSDC float64 `json:"amount_usdc"`
 	Provider   string  `json:"provider"`
+	Network    string  `json:"network"` // "base" (default) or "solana"
 }
 
 // InitiateDepositResponse represents the response after initiating a deposit
@@ -250,6 +262,7 @@ type InitiateDepositResponse struct {
 	DepositID      string  `json:"deposit_id"`
 	AmountUSDC     float64 `json:"amount_usdc"`
 	Provider       string  `json:"provider"`
+	Network        string  `json:"network"`
 	Status         string  `json:"status"`
 	CheckoutURL    *string `json:"checkout_url,omitempty"`
 	ClientSecret   *string `json:"client_secret,omitempty"`
@@ -312,6 +325,17 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		})
 	}
 
+	// Validate network - default to "base" if empty
+	network := req.Network
+	if network == "" {
+		network = "base"
+	}
+	if network != "base" && network != "solana" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid network. Must be 'base' or 'solana'",
+		})
+	}
+
 	ctx := c.Context()
 
 	// Get account to check wallet address
@@ -322,6 +346,15 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		})
 	}
 
+	// Resolve wallet address for the selected network
+	var walletAddress *string
+	switch network {
+	case "base":
+		walletAddress = account.EVMWalletAddress
+	case "solana":
+		walletAddress = account.SolanaWalletAddress
+	}
+
 	// Create deposit record
 	deposit := &db.Deposit{
 		AccountID:  accountID,
@@ -329,10 +362,11 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		AmountUSDC: req.AmountUSDC,
 		FeeUSDC:    calculateFee(req.AmountUSDC, provider),
 		Status:     db.DepositStatusPending,
+		Metadata:   map[string]any{"network": network},
 	}
 
-	if account.WalletAddress != nil {
-		deposit.WalletAddress = account.WalletAddress
+	if walletAddress != nil {
+		deposit.WalletAddress = walletAddress
 	}
 
 	if err := h.db.CreateDeposit(ctx, deposit); err != nil {
@@ -346,22 +380,23 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		DepositID:  deposit.ID.String(),
 		AmountUSDC: req.AmountUSDC,
 		Provider:   string(provider),
+		Network:    network,
 		Status:     string(db.DepositStatusPending),
 	}
 
 	switch provider {
 	case db.DepositProviderStripe:
-		// Require linked wallet for Stripe onramp
-		if account.WalletAddress == nil || *account.WalletAddress == "" {
+		// Require linked wallet for the selected network
+		if walletAddress == nil || *walletAddress == "" {
 			// Cancel the pending deposit
-			_ = h.db.FailDeposit(ctx, deposit.ID, "No wallet linked")
+			_ = h.db.FailDeposit(ctx, deposit.ID, fmt.Sprintf("No %s wallet linked", network))
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "You must link a wallet address before using Stripe to purchase crypto",
+				"error": fmt.Sprintf("You must link a %s wallet address before using Stripe to purchase crypto", network),
 			})
 		}
 
-		// Create Stripe Crypto Onramp session
-		session, err := h.createStripeOnrampSession(deposit.ID.String(), *account.WalletAddress)
+		// Create Stripe Crypto Onramp session targeting the selected network
+		session, err := h.createStripeOnrampSession(deposit.ID.String(), *walletAddress, network)
 		if err != nil {
 			// Mark deposit as failed
 			_ = h.db.FailDeposit(ctx, deposit.ID, fmt.Sprintf("Failed to create Stripe session: %v", err))
@@ -384,13 +419,22 @@ func (h *AccountHandler) InitiateDeposit(c fiber.Ctx) error {
 		if h.stripeConfig != nil {
 			resp.PublishableKey = &h.stripeConfig.PublishableKey
 		}
-		resp.Instructions = "Complete your purchase using the Stripe Crypto Onramp. USDC will be delivered to your wallet and credited to your account."
+		networkLabel := "Base"
+		if network == "solana" {
+			networkLabel = "Solana"
+		}
+		resp.Instructions = fmt.Sprintf("Complete your purchase using the Stripe Crypto Onramp. USDC will be delivered to your %s wallet and credited to your account.", networkLabel)
 
 	case db.DepositProviderDirect:
-		if account.WalletAddress != nil {
-			resp.WalletAddress = account.WalletAddress
+		if walletAddress != nil {
+			resp.WalletAddress = walletAddress
 		}
-		resp.Instructions = "Send USDC on Base network to your wallet address. Deposits are credited automatically after blockchain confirmation."
+		switch network {
+		case "base":
+			resp.Instructions = "Send USDC on Base network to your wallet address. Deposits are credited automatically after blockchain confirmation."
+		case "solana":
+			resp.Instructions = "Send USDC on Solana network to your wallet address. Deposits are credited automatically after blockchain confirmation."
+		}
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(resp)
@@ -451,24 +495,39 @@ func (h *AccountHandler) GetDeposits(c fiber.Ctx) error {
 	})
 }
 
-// LinkWalletRequest represents a request to link a wallet
-type LinkWalletRequest struct {
-	WalletAddress string `json:"wallet_address"`
+// Validation patterns for wallet addresses
+var (
+	evmAddressRegex    = regexp.MustCompile(`^0x[a-fA-F0-9]{40}$`)
+	solanaAddressRegex = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{32,44}$`)
+)
+
+// UpdateWalletsRequest represents a request to update wallet addresses
+type UpdateWalletsRequest struct {
+	EVMAddress    *string `json:"evm_address,omitempty"`
+	SolanaAddress *string `json:"solana_address,omitempty"`
 }
 
-// LinkWallet links a wallet address to the account
-// @Summary Link a wallet address
-// @Description Links an Ethereum wallet address to the account for receiving crypto
+// UpdateWalletsResponse represents the response from updating wallet addresses
+type UpdateWalletsResponse struct {
+	EVMWalletAddress    *string `json:"evm_wallet_address,omitempty"`
+	SolanaWalletAddress *string `json:"solana_wallet_address,omitempty"`
+}
+
+// UpdateWallets updates wallet addresses for the authenticated account
+// @Summary Update wallet addresses
+// @Description Update EVM and/or Solana wallet addresses for the authenticated account
 // @Tags account
 // @Accept json
 // @Produce json
-// @Param request body LinkWalletRequest true "Wallet address (0x...)"
-// @Success 200 {object} map[string]string "Wallet linked successfully"
-// @Failure 400 {object} map[string]string "Invalid wallet address or already linked"
+// @Param request body UpdateWalletsRequest true "Wallet addresses to update (both optional)"
+// @Success 200 {object} UpdateWalletsResponse
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 409 {object} map[string]string "Wallet address already linked to another account"
 // @Failure 401 {object} map[string]string "Not authenticated"
+// @Failure 500 {object} map[string]string "Server error"
 // @Security CookieAuth
-// @Router /v1/account/wallet [put]
-func (h *AccountHandler) LinkWallet(c fiber.Ctx) error {
+// @Router /v1/account/wallets [put]
+func (h *AccountHandler) UpdateWallets(c fiber.Ctx) error {
 	accountIDStr := c.Locals("account_id")
 	if accountIDStr == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -483,31 +542,225 @@ func (h *AccountHandler) LinkWallet(c fiber.Ctx) error {
 		})
 	}
 
-	var req LinkWalletRequest
+	var req UpdateWalletsRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
 
-	if !isValidWalletAddress(req.WalletAddress) {
+	// Validate EVM address if provided
+	if req.EVMAddress != nil {
+		evmAddr := strings.TrimSpace(*req.EVMAddress)
+		if evmAddr == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "EVM wallet address cannot be empty",
+			})
+		}
+		if !evmAddressRegex.MatchString(evmAddr) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid EVM wallet address format (expected 0x + 40 hex chars)",
+			})
+		}
+		req.EVMAddress = &evmAddr
+	}
+
+	// Validate Solana address if provided
+	if req.SolanaAddress != nil {
+		solanaAddr := strings.TrimSpace(*req.SolanaAddress)
+		if solanaAddr == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Solana wallet address cannot be empty",
+			})
+		}
+		if !solanaAddressRegex.MatchString(solanaAddr) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid Solana wallet address format (expected base58, 32-44 chars)",
+			})
+		}
+		req.SolanaAddress = &solanaAddr
+	}
+
+	// Check that at least one address is provided
+	if req.EVMAddress == nil && req.SolanaAddress == nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid wallet address format",
+			"error": "At least one wallet address must be provided",
 		})
 	}
 
 	ctx := c.Context()
 
-	if err := h.db.LinkWallet(ctx, accountID, req.WalletAddress); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": err.Error(),
+	// Update wallet addresses
+	if err := h.db.UpdateWalletAddresses(ctx, accountID, req.EVMAddress, req.SolanaAddress); err != nil {
+		if errors.Is(err, db.ErrEVMWalletAddressConflict) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "EVM wallet address is already linked to another account",
+			})
+		}
+		if errors.Is(err, db.ErrSolanaWalletAddressConflict) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "Solana wallet address is already linked to another account",
+			})
+		}
+		if errors.Is(err, db.ErrInvalidEVMWalletAddress) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid EVM wallet address",
+			})
+		}
+		if errors.Is(err, db.ErrInvalidSolanaWalletAddress) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid Solana wallet address",
+			})
+		}
+
+		slog.Error("failed to update wallet addresses", "account_id", accountID, "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to update wallet addresses",
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"message":        "Wallet linked successfully",
-		"wallet_address": req.WalletAddress,
+	// Fetch updated account to return current state
+	account, err := h.db.GetAccountByID(ctx, accountID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve updated account",
+		})
+	}
+
+	return c.JSON(UpdateWalletsResponse{
+		EVMWalletAddress:    account.EVMWalletAddress,
+		SolanaWalletAddress: account.SolanaWalletAddress,
 	})
+}
+
+// WalletBalanceInfo represents balance information for a single wallet
+type WalletBalanceInfo struct {
+	Address     string  `json:"address"`
+	BalanceUSDC float64 `json:"balance_usdc"`
+	Network     string  `json:"network"`
+	Error       string  `json:"error,omitempty"`
+}
+
+// GetBalancesResponse represents the response from GetBalances
+type GetBalancesResponse struct {
+	EVM       *WalletBalanceInfo `json:"evm,omitempty"`
+	Solana    *WalletBalanceInfo `json:"solana,omitempty"`
+	TotalUSDC float64            `json:"total_usdc"`
+}
+
+// GetBalances returns on-chain USDC balances for the account's wallets
+// @Summary Get wallet balances
+// @Description Returns on-chain USDC balances for the account's EVM and Solana wallets
+// @Tags account
+// @Produce json
+// @Success 200 {object} GetBalancesResponse
+// @Failure 401 {object} map[string]string "Not authenticated"
+// @Failure 404 {object} map[string]string "Account not found"
+// @Security CookieAuth
+// @Router /v1/account/balances [get]
+func (h *AccountHandler) GetBalances(c fiber.Ctx) error {
+	accountIDStr := c.Locals("account_id")
+	if accountIDStr == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Not authenticated",
+		})
+	}
+
+	accountID, err := uuid.Parse(accountIDStr.(string))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Invalid account ID",
+		})
+	}
+
+	account, err := h.db.GetAccountByID(c.Context(), accountID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Account not found",
+		})
+	}
+
+	resp := GetBalancesResponse{}
+	var totalUSDC float64
+
+	// Use a single request-level timeout budget and query both chains in parallel.
+	ctx, cancel := context.WithTimeout(c.Context(), 28*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// Query EVM balance if wallet is configured
+	if account.EVMWalletAddress != nil && *account.EVMWalletAddress != "" {
+		address := *account.EVMWalletAddress
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			info := &WalletBalanceInfo{
+				Address: address,
+				Network: "base",
+			}
+
+			balance, err := wallet.QueryEVMBalance(ctx, address, "base")
+			if err != nil {
+				slog.Error("failed to query EVM balance",
+					"account_id", accountID,
+					"address", address,
+					"error", err,
+				)
+				info.Error = "Failed to query balance"
+			} else {
+				info.BalanceUSDC = balance
+			}
+
+			mu.Lock()
+			resp.EVM = info
+			if err == nil {
+				totalUSDC += balance
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// Query Solana balance if wallet is configured
+	if account.SolanaWalletAddress != nil && *account.SolanaWalletAddress != "" {
+		address := *account.SolanaWalletAddress
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			info := &WalletBalanceInfo{
+				Address: address,
+				Network: "solana",
+			}
+
+			balance, err := wallet.QuerySolanaBalance(ctx, address, "solana")
+			if err != nil {
+				slog.Error("failed to query Solana balance",
+					"account_id", accountID,
+					"address", address,
+					"error", err,
+				)
+				info.Error = "Failed to query balance"
+			} else {
+				info.BalanceUSDC = balance
+			}
+
+			mu.Lock()
+			resp.Solana = info
+			if err == nil {
+				totalUSDC += balance
+			}
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+
+	resp.TotalUSDC = totalUSDC
+
+	return c.JSON(resp)
 }
 
 // calculateFee calculates the fee for a deposit based on provider
@@ -531,17 +784,20 @@ type stripeOnrampSession struct {
 	Status       string `json:"status"`
 }
 
-// createStripeOnrampSession creates a Stripe Crypto Onramp session
-func (h *AccountHandler) createStripeOnrampSession(depositID, walletAddress string) (*stripeOnrampSession, error) {
+// createStripeOnrampSession creates a Stripe Crypto Onramp session targeting the specified network
+func (h *AccountHandler) createStripeOnrampSession(depositID, walletAddress, network string) (*stripeOnrampSession, error) {
 	if h.stripeConfig == nil || h.stripeConfig.SecretKey == "" {
 		return nil, fmt.Errorf("stripe not configured")
 	}
 
-	// Build form data for the API request
+	// Build form data for the API request.
+	// Stripe Crypto Onramp uses "base" and "solana" as network identifiers
+	// for wallet_addresses and destination_networks parameters.
+	// See: https://docs.stripe.com/crypto/onramp
 	data := url.Values{}
-	data.Set("wallet_addresses[base]", walletAddress)
+	data.Set("wallet_addresses["+network+"]", walletAddress)
 	data.Set("destination_currencies[]", "usdc")
-	data.Set("destination_networks[]", "base")
+	data.Set("destination_networks[]", network)
 	data.Set("lock_wallet_address", "true")
 	data.Set("metadata[deposit_id]", depositID)
 

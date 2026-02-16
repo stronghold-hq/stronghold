@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -15,13 +15,43 @@ import { CopyButton } from '@/components/ui/CopyButton';
 import { formatUSDC } from '@/lib/utils';
 import { API_URL, fetchWithAuth } from '@/lib/api';
 
+type Network = 'base' | 'solana';
+
 export default function DepositPage() {
   const { account } = useAuth();
   const [amount, setAmount] = useState('');
   const [provider, setProvider] = useState<'stripe' | 'direct'>('stripe');
+  const [network, setNetwork] = useState<Network>('base');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+
+  // Determine which wallets are linked
+  const hasEVM = !!(account?.evm_wallet_address);
+  const hasSolana = !!(account?.solana_wallet_address);
+  const linkedNetworks = useMemo(() => {
+    const nets: Network[] = [];
+    if (hasEVM) nets.push('base');
+    if (hasSolana) nets.push('solana');
+    return nets;
+  }, [hasEVM, hasSolana]);
+
+  // Auto-select if only one wallet is linked
+  const effectiveNetwork = useMemo(() => {
+    if (linkedNetworks.length === 1) return linkedNetworks[0];
+    return network;
+  }, [linkedNetworks, network]);
+
+  const showNetworkSelector = linkedNetworks.length > 1;
+
+  // Get wallet address for the selected network
+  const selectedWalletAddress = useMemo(() => {
+    if (effectiveNetwork === 'base') return account?.evm_wallet_address;
+    if (effectiveNetwork === 'solana') return account?.solana_wallet_address;
+    return undefined;
+  }, [effectiveNetwork, account]);
+
+  const networkLabel = effectiveNetwork === 'base' ? 'Base (EVM)' : 'Solana';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +68,11 @@ export default function DepositPage() {
       return;
     }
 
+    if (!selectedWalletAddress && provider === 'stripe') {
+      setError(`No ${networkLabel} wallet linked. Link one in Settings first.`);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const response = await fetchWithAuth(`${API_URL}/v1/account/deposit`, {
@@ -48,6 +83,7 @@ export default function DepositPage() {
         body: JSON.stringify({
           amount_usdc: amountNum,
           provider: provider,
+          network: effectiveNetwork,
         }),
       });
 
@@ -184,6 +220,68 @@ export default function DepositPage() {
               </button>
             </div>
 
+            {/* Network Selection - only shown if user has more than one wallet linked */}
+            {showNetworkSelector && (
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Target Network
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setNetwork('base')}
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      effectiveNetwork === 'base'
+                        ? 'border-[#00D4AA] bg-[#00D4AA]/10'
+                        : 'border-[#333] hover:border-[#444]'
+                    }`}
+                  >
+                    <span
+                      className={`font-medium text-sm ${
+                        effectiveNetwork === 'base' ? 'text-white' : 'text-gray-400'
+                      }`}
+                    >
+                      Base (EVM)
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setNetwork('solana')}
+                    className={`p-3 rounded-xl border transition-all text-center ${
+                      effectiveNetwork === 'solana'
+                        ? 'border-[#00D4AA] bg-[#00D4AA]/10'
+                        : 'border-[#333] hover:border-[#444]'
+                    }`}
+                  >
+                    <span
+                      className={`font-medium text-sm ${
+                        effectiveNetwork === 'solana' ? 'text-white' : 'text-gray-400'
+                      }`}
+                    >
+                      Solana
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* No wallets linked */}
+            {linkedNetworks.length === 0 && (
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-6">
+                <div className="flex items-center gap-2 text-yellow-400 text-sm">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>
+                    No wallets linked.{' '}
+                    <a
+                      href="/dashboard/main/settings"
+                      className="underline hover:text-yellow-300"
+                    >
+                      Link a wallet in Settings
+                    </a>{' '}
+                    to deposit funds.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {provider === 'stripe' ? (
               /* Stripe Form */
               <form onSubmit={handleSubmit} className="space-y-4">
@@ -206,7 +304,7 @@ export default function DepositPage() {
                     </span>
                   </div>
                   <p className="text-gray-500 text-xs mt-2">
-                    Minimum deposit: 10 USDC. Fees apply.
+                    Minimum deposit: 10 USDC. Fees apply. Targeting {networkLabel} wallet.
                   </p>
                 </div>
 
@@ -219,7 +317,7 @@ export default function DepositPage() {
 
                 <button
                   type="submit"
-                  disabled={isSubmitting || !amount}
+                  disabled={isSubmitting || !amount || !selectedWalletAddress}
                   className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
@@ -237,19 +335,19 @@ export default function DepositPage() {
               <div className="space-y-4">
                 <div className="bg-[#0a0a0a] border border-[#333] rounded-xl p-4">
                   <div className="text-sm text-gray-400 mb-2">
-                    Send USDC on Base to:
+                    Send USDC on {networkLabel} to:
                   </div>
-                  {account?.wallet_address ? (
+                  {selectedWalletAddress ? (
                     <div className="flex items-center gap-2">
                       <code className="flex-1 font-mono text-white text-sm break-all">
-                        {account.wallet_address}
+                        {selectedWalletAddress}
                       </code>
-                      <CopyButton text={account.wallet_address} className="p-2" />
+                      <CopyButton text={selectedWalletAddress} className="p-2" />
                     </div>
                   ) : (
                     <div className="text-center py-4">
                       <p className="text-gray-400 mb-2">
-                        No wallet linked to your account.
+                        No {networkLabel} wallet linked to your account.
                       </p>
                       <a
                         href="/dashboard/main/settings"
@@ -266,7 +364,7 @@ export default function DepositPage() {
                     Important
                   </h4>
                   <ul className="text-blue-300/80 text-sm space-y-1">
-                    <li>• Only send USDC on Base network</li>
+                    <li>• Only send USDC on {networkLabel} network</li>
                     <li>• Deposits are credited automatically</li>
                     <li>• No fees for direct deposits</li>
                     <li>• Processing time: 1-2 minutes</li>

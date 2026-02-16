@@ -20,7 +20,7 @@ func TestCreateSession_HashesToken(t *testing.T) {
 	ctx := context.Background()
 
 	// Create an account
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create session
@@ -54,7 +54,7 @@ func TestGetSession_RejectsExpired(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create session with very short duration
@@ -78,7 +78,7 @@ func TestRotateRefreshToken_InvalidatesOld(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create session
@@ -112,7 +112,7 @@ func TestDeleteAllSessions_MultiDevice(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	// Create multiple sessions (simulating multiple devices)
@@ -153,7 +153,7 @@ func TestDeleteSession_ByID(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -176,7 +176,7 @@ func TestDeleteSessionByRefreshToken(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -199,7 +199,7 @@ func TestUpdateSessionLastUsed(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -229,7 +229,7 @@ func TestCleanupExpiredSessions(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -262,7 +262,7 @@ func TestGetAccountSessions_OrderedByLastUsed(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -296,7 +296,7 @@ func TestSession_StoresIPAndUserAgent(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("10.0.0.1")
@@ -325,7 +325,7 @@ func TestRotateRefreshToken_ExtendsExpiry(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")
@@ -361,7 +361,7 @@ func TestRotateRefreshToken_ExpiredSession(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateAccount(ctx, nil)
+	account, err := db.CreateAccount(ctx, nil, nil)
 	require.NoError(t, err)
 
 	ip := net.ParseIP("127.0.0.1")

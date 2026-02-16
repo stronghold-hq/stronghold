@@ -163,14 +163,33 @@ Run `stronghold doctor` to verify that all system requirements are met.
 | `stronghold enable` | Start proxy and enable traffic interception | Yes |
 | `stronghold disable` | Stop proxy and restore direct network access | Yes |
 | `stronghold status` | Display proxy status and statistics | No |
+| `stronghold health` | Check API and Base/Solana RPC health | No |
 | `stronghold logs` | View proxy logs | No |
 | `stronghold account balance` | Display current account balance | No |
 | `stronghold account deposit` | Display deposit options | No |
+| `stronghold wallet list` | List configured Base/Solana wallet addresses | No |
+| `stronghold wallet balance` | Display per-chain wallet balances | No |
 | `stronghold wallet export` | Export private key for backup | No |
-| `stronghold wallet replace` | Replace wallet with a new private key | No |
+| `stronghold wallet replace <evm\|solana>` | Replace wallet by chain | No |
+| `stronghold wallet link` | Register local wallet addresses with server | No |
 | `stronghold config get [key]` | Display configuration value(s) | No |
 | `stronghold config set <key> <value>` | Update a configuration value | No |
 | `stronghold uninstall` | Remove Stronghold from the system | Yes |
+
+### Wallet Commands
+
+```bash
+# List configured wallets
+stronghold wallet list
+
+# Show per-chain balances
+stronghold wallet balance
+
+# Replace specific wallet by chain (positional)
+stronghold wallet replace evm
+stronghold wallet replace solana
+
+```
 
 ### Configuring Scan Behavior
 

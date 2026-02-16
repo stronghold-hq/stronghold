@@ -78,3 +78,31 @@ export async function fetchWithAuth(
 
   return response;
 }
+
+// --- Typed API helpers ---
+
+/** Balance information for a single wallet chain */
+export interface WalletBalanceInfo {
+  address: string;
+  balance_usdc: number;
+  network: string;
+  error?: string;
+}
+
+/** Response from GET /v1/account/balances */
+export interface BalancesResponse {
+  evm?: WalletBalanceInfo;
+  solana?: WalletBalanceInfo;
+  total_usdc: number;
+}
+
+/**
+ * Fetch on-chain USDC balances for the authenticated account's wallets.
+ */
+export async function fetchBalances(): Promise<BalancesResponse> {
+  const response = await fetchWithAuth(`${API_URL}/v1/account/balances`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch balances');
+  }
+  return response.json();
+}

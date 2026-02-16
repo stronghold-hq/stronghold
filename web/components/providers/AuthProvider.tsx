@@ -6,7 +6,8 @@ import { API_URL } from '@/lib/api';
 interface Account {
   id: string;
   account_number: string;
-  wallet_address?: string;
+  evm_wallet_address?: string;   // EVM (Base) wallet
+  solana_wallet_address?: string; // Solana wallet
   balance_usdc: number;
   status: string;
   created_at: string;

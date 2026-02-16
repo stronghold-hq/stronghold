@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	version   = "dev"
-	commit    = "unknown"
-	date      = "unknown"
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
 )
 
 func main() {
@@ -111,6 +111,21 @@ This will:
 		Long:  `Display the current status of the Stronghold proxy, including protection status, usage statistics, and configuration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cli.Status()
+		},
+	}
+
+	// Health command
+	healthCmd := &cobra.Command{
+		Use:   "health",
+		Short: "Check API and network RPC health",
+		Long: `Display health for:
+  1. Stronghold API (/health)
+  2. Base RPC
+  3. Solana RPC
+
+RPC statuses are reported as: up, down, or congested.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.Health()
 		},
 	}
 
@@ -257,7 +272,26 @@ Both Base and Solana deposit addresses are shown if configured.`,
 	// Wallet command
 	walletCmd := &cobra.Command{
 		Use:   "wallet",
-		Short: "Manage your Stronghold wallets (Base and Solana)",
+		Short: "List, check balances, and manage Base/Solana wallets",
+	}
+
+	walletListCmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"show"},
+		Short:   "List configured wallets by chain",
+		Long:    `List your currently configured Base (EVM) and Solana wallet addresses.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletList()
+		},
+	}
+
+	walletBalanceCmd := &cobra.Command{
+		Use:   "balance",
+		Short: "Check wallet balances by chain",
+		Long:  `Display USDC balances for configured Base (EVM) and Solana wallets.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletBalance()
+		},
 	}
 
 	walletExportCmd := &cobra.Command{
@@ -278,13 +312,17 @@ Use --output to specify a different base location.`,
 	walletExportCmd.Flags().StringP("output", "o", "", "Output file path (default: ~/.stronghold/wallet-backup)")
 
 	walletReplaceCmd := &cobra.Command{
-		Use:   "replace",
+		Use:   "replace <evm|solana>",
 		Short: "Replace wallet with a new private key",
 		Long: `Replace your current wallet with a new one.
 
-Use --chain to specify which wallet to replace:
-  --chain base    Replace the Base (EVM) wallet (default)
-  --chain solana  Replace the Solana wallet
+Specify chain positionally:
+  stronghold wallet replace evm
+  stronghold wallet replace solana
+
+Supported chain values:
+  evm            Replace the Base (EVM) wallet
+  solana         Replace the Solana wallet
 
 Reads the private key from (in order of precedence):
   1. stdin (if piped)
@@ -297,25 +335,42 @@ for multi-device setup (requires TOTP). Server upload is not supported for
 Solana wallets.
 
 Example:
-  echo $KEY | stronghold wallet replace --yes
-  echo $SOL_KEY | stronghold wallet replace --chain solana --yes
-  STRONGHOLD_PRIVATE_KEY=xxx stronghold wallet replace --yes
-  STRONGHOLD_SOLANA_PRIVATE_KEY=xxx stronghold wallet replace --chain solana --yes
-  stronghold wallet replace --file /path/to/key.txt
-  stronghold wallet replace --chain solana --file /path/to/solana-key.txt
-  stronghold wallet replace  # interactive prompt`,
+  stronghold wallet replace evm
+  stronghold wallet replace solana
+  echo $KEY | stronghold wallet replace evm --yes
+  echo $SOL_KEY | stronghold wallet replace solana --yes
+  STRONGHOLD_PRIVATE_KEY=xxx stronghold wallet replace evm --yes
+  STRONGHOLD_SOLANA_PRIVATE_KEY=xxx stronghold wallet replace solana --yes
+  stronghold wallet replace evm --file /path/to/key.txt
+  stronghold wallet replace solana --file /path/to/solana-key.txt`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			chainFlag, _ := cmd.Flags().GetString("chain")
 			fileFlag, _ := cmd.Flags().GetString("file")
 			yesFlag, _ := cmd.Flags().GetBool("yes")
-			return cli.WalletReplace(chainFlag, fileFlag, yesFlag)
+			return cli.WalletReplace(args[0], fileFlag, yesFlag)
 		},
 	}
-	walletReplaceCmd.Flags().String("chain", "base", "Which chain wallet to replace (base or solana)")
 	walletReplaceCmd.Flags().StringP("file", "f", "", "Read private key from file")
 	walletReplaceCmd.Flags().BoolP("yes", "y", false, "Skip warnings and confirmations")
 
-	walletCmd.AddCommand(walletExportCmd, walletReplaceCmd)
+	walletLinkCmd := &cobra.Command{
+		Use:   "link",
+		Short: "Register wallet addresses with the server",
+		Long: `Register your locally-configured wallet public keys with the Stronghold server.
+
+This links your Base (EVM) and/or Solana wallet addresses to your account
+so the server knows which wallets belong to you. No private keys are sent.
+
+Requires TOTP verification (trusted device).
+
+This is done automatically during 'stronghold init' and 'stronghold wallet replace',
+but you can use this command to manually re-register if needed.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cli.WalletLink()
+		},
+	}
+
+	walletCmd.AddCommand(walletListCmd, walletBalanceCmd, walletExportCmd, walletReplaceCmd, walletLinkCmd)
 
 	// Doctor command
 	doctorCmd := &cobra.Command{
@@ -344,6 +399,7 @@ Run this before 'stronghold init' to catch issues early.`,
 		enableCmd,
 		disableCmd,
 		statusCmd,
+		healthCmd,
 		uninstallCmd,
 		logsCmd,
 		configCmd,
