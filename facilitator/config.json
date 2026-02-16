@@ -5,7 +5,7 @@
     "eip155:8453": {
       "_comment": "Base Mainnet",
       "eip1559": true,
-      "signers": ["$FACILITATOR_PRIVATE_KEY"],
+      "signers": ["$FACILITATOR_EVM_PRIVATE_KEY"],
       "rpc": [
         {
           "http": "$RPC_URL_BASE",
@@ -16,7 +16,7 @@
     "eip155:84532": {
       "_comment": "Base Sepolia",
       "eip1559": true,
-      "signers": ["$FACILITATOR_PRIVATE_KEY"],
+      "signers": ["$FACILITATOR_EVM_PRIVATE_KEY"],
       "rpc": [
         {
           "http": "$RPC_URL_BASE_SEPOLIA",
@@ -26,23 +26,13 @@
     },
     "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": {
       "_comment": "Solana Mainnet",
-      "signers": ["$FACILITATOR_SOLANA_PRIVATE_KEY"],
-      "rpc": [
-        {
-          "http": "$RPC_URL_SOLANA",
-          "rate_limit": 25
-        }
-      ]
+      "signer": "$FACILITATOR_SOLANA_PRIVATE_KEY",
+      "rpc": "$RPC_URL_SOLANA"
     },
     "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": {
       "_comment": "Solana Devnet",
-      "signers": ["$FACILITATOR_SOLANA_PRIVATE_KEY"],
-      "rpc": [
-        {
-          "http": "$RPC_URL_SOLANA_DEVNET",
-          "rate_limit": 25
-        }
-      ]
+      "signer": "$FACILITATOR_SOLANA_PRIVATE_KEY",
+      "rpc": "$RPC_URL_SOLANA_DEVNET"
     }
   },
   "schemes": [

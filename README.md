@@ -403,7 +403,7 @@ Copy `.env.example` to `.env` and configure the required values. See `.env.examp
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `FACILITATOR_PRIVATE_KEY` | Yes | - | Private key for the settlement wallet (funded with ETH for gas) |
+| `FACILITATOR_EVM_PRIVATE_KEY` | Yes | - | Private key for the EVM settlement wallet (funded with ETH for gas) |
 | `RPC_URL_BASE` | Yes | - | Base mainnet RPC endpoint |
 | `RPC_URL_BASE_SEPOLIA` | No | - | Base Sepolia RPC endpoint (for testnet) |
 

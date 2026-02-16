@@ -674,7 +674,7 @@ service alongside the API (docker-compose handles this automatically).
 
 | Variable                       | Required | Default      | Description                       |
 |--------------------------------|----------|--------------|-----------------------------------|
-| FACILITATOR_PRIVATE_KEY        | Yes      | -            | EVM settlement wallet private key |
+| FACILITATOR_EVM_PRIVATE_KEY    | Yes      | -            | EVM settlement wallet private key |
 | FACILITATOR_SOLANA_PRIVATE_KEY | No       | -            | Solana settlement wallet key      |
 | RPC_URL_BASE                   | Yes      | -            | Base mainnet RPC endpoint         |
 | RPC_URL_BASE_SEPOLIA           | No       | -            | Base Sepolia RPC (testnet)        |

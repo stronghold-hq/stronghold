@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -25,7 +23,7 @@ services:
     ports:
       - "127.0.0.1:8402:8402"
     environment:
-      - FACILITATOR_PRIVATE_KEY=${FACILITATOR_PRIVATE_KEY:-}
+      - FACILITATOR_EVM_PRIVATE_KEY=${FACILITATOR_EVM_PRIVATE_KEY:-}
       - FACILITATOR_SOLANA_PRIVATE_KEY=${FACILITATOR_SOLANA_PRIVATE_KEY:-}
       - RPC_URL_BASE=${RPC_URL_BASE:-https://mainnet.base.org}
       - RPC_URL_BASE_SEPOLIA=${RPC_URL_BASE_SEPOLIA:-https://sepolia.base.org}
@@ -47,6 +45,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
+      - ENV=${ENV}
       - PORT=8080
       # Database
       - DB_HOST=postgres

@@ -39,7 +39,7 @@ services:
       context: ./facilitator
       dockerfile: Dockerfile
     environment:
-      FACILITATOR_PRIVATE_KEY: ${FACILITATOR_PRIVATE_KEY:-}
+      FACILITATOR_EVM_PRIVATE_KEY: ${FACILITATOR_EVM_PRIVATE_KEY:-}
       FACILITATOR_SOLANA_PRIVATE_KEY: ${FACILITATOR_SOLANA_PRIVATE_KEY:-}
       RPC_URL_BASE: ${RPC_URL_BASE:-https://mainnet.base.org}
       RPC_URL_BASE_SEPOLIA: ${RPC_URL_BASE_SEPOLIA:-https://sepolia.base.org}

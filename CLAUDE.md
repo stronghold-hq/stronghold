@@ -305,7 +305,7 @@ fly secrets set KMS_KEY_ID=alias/stronghold-wallet-keys -a stronghold-api
 
 ```bash
 # EVM settlement wallet (must be funded with ETH on Base for gas)
-fly secrets set FACILITATOR_PRIVATE_KEY=0x<evm-private-key> -a stronghold-facilitator
+fly secrets set FACILITATOR_EVM_PRIVATE_KEY=0x<evm-private-key> -a stronghold-facilitator
 
 # Solana settlement wallet (must be funded with SOL for fees)
 fly secrets set FACILITATOR_SOLANA_PRIVATE_KEY=<base58-solana-private-key> -a stronghold-facilitator
