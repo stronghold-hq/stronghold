@@ -8,13 +8,13 @@ const footerLinks = {
   Product: [
     { label: 'Features', href: '#features' },
     { label: 'Pricing', href: '#pricing' },
-    { label: 'Documentation', href: '#docs' },
+    { label: 'Documentation', href: 'https://api.getstronghold.xyz/docs', external: true },
     { label: 'Changelog', href: 'https://github.com/yv-was-taken/stronghold/commits/master', external: true },
   ],
   Resources: [
     { label: 'GitHub', href: 'https://github.com/yv-was-taken/stronghold', external: true },
-    { label: 'Telegram', href: '#' },
-    { label: 'Twitter', href: '#' },
+    { label: 'Telegram', href: 'https://t.me/getstronghold', external: true },
+    { label: 'Twitter', href: 'https://x.com/strongholdxyz', external: true },
   ],
 }
 
@@ -47,13 +47,17 @@ export default function Footer() {
                 <Github size={20} />
               </a>
               <a
-                href="#"
+                href="https://t.me/getstronghold"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="text-gray-500 hover:text-stronghold-cyan transition-colors"
               >
                 <Send size={20} />
               </a>
               <a
-                href="#"
+                href="https://x.com/strongholdxyz"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="text-gray-500 hover:text-stronghold-cyan transition-colors"
               >
                 <Twitter size={20} />
