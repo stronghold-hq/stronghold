@@ -30,13 +30,25 @@ export function isValidAccountNumber(input: string): boolean {
 }
 
 /**
- * Format USDC balance with proper decimals
+ * Format a microUSDC string from the API into a human-readable dollar string.
+ * 1 USDC = 1,000,000 microUSDC.
+ *
+ * Examples:
+ *   "1250000" -> "$1.25"
+ *   "1000000" -> "$1.00"
+ *   "1000"    -> "$0.001"
+ *   "0"       -> "$0.00"
  */
-export function formatUSDC(balance: number): string {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  }).format(balance);
+export function formatUSDC(microStr: string): string {
+  const micro = Number(microStr || "0");
+  const whole = Math.floor(micro / 1_000_000);
+  const frac = micro % 1_000_000;
+  const raw = `${whole}.${String(frac).padStart(6, '0')}`;
+  // Trim trailing zeros but keep at least 2 decimal places
+  const dotIdx = raw.indexOf('.');
+  let end = raw.length;
+  while (end > dotIdx + 3 && raw[end - 1] === '0') end--;
+  return `$${raw.slice(0, end)}`;
 }
 
 /**

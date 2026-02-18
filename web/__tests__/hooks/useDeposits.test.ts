@@ -5,9 +5,9 @@ import { useDeposits } from '@/lib/hooks/useDeposits'
 const mockDeposits = [
   {
     id: '1',
-    amount_usdc: 100,
-    fee_usdc: 3,
-    net_usdc: 97,
+    amount_usdc: '100000000',
+    fee_usdc: '3000000',
+    net_usdc: '97000000',
     provider: 'stripe' as const,
     status: 'completed' as const,
     created_at: '2024-01-15T12:00:00Z',
@@ -15,9 +15,9 @@ const mockDeposits = [
   },
   {
     id: '2',
-    amount_usdc: 50,
-    fee_usdc: 0,
-    net_usdc: 50,
+    amount_usdc: '50000000',
+    fee_usdc: '0',
+    net_usdc: '50000000',
     provider: 'direct' as const,
     status: 'pending' as const,
     created_at: '2024-01-14T10:00:00Z',

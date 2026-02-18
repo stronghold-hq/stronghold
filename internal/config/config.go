@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stronghold/internal/usdc"
 )
 
 // Environment represents the runtime environment
@@ -124,10 +126,10 @@ type StrongholdConfig struct {
 	LLMAPIKey        string
 }
 
-// PricingConfig holds endpoint pricing in USD
+// PricingConfig holds endpoint pricing in microUSDC
 type PricingConfig struct {
-	ScanContent float64
-	ScanOutput  float64
+	ScanContent usdc.MicroUSDC
+	ScanOutput  usdc.MicroUSDC
 }
 
 // RateLimitConfig holds rate limiting configuration
@@ -208,8 +210,8 @@ func Load() *Config {
 			LLMAPIKey:       getEnv("STRONGHOLD_LLM_API_KEY", ""),
 		},
 		Pricing: PricingConfig{
-			ScanContent: getFloat("PRICE_SCAN_CONTENT", 0.001),
-			ScanOutput:  getFloat("PRICE_SCAN_OUTPUT", 0.001),
+			ScanContent: getMicroUSDC("PRICE_SCAN_CONTENT", 0.001),
+			ScanOutput:  getMicroUSDC("PRICE_SCAN_OUTPUT", 0.001),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:       getBool("RATE_LIMIT_ENABLED", true),
@@ -260,6 +262,16 @@ func getFloat(key string, defaultValue float64) float64 {
 		}
 	}
 	return defaultValue
+}
+
+// getMicroUSDC parses a human-readable float env var (e.g. "0.001") into MicroUSDC.
+func getMicroUSDC(key string, defaultFloat float64) usdc.MicroUSDC {
+	if value := os.Getenv(key); value != "" {
+		if f, err := strconv.ParseFloat(value, 64); err == nil {
+			return usdc.FromFloat(f)
+		}
+	}
+	return usdc.FromFloat(defaultFloat)
 }
 
 func getInt(key string, defaultValue int) int {

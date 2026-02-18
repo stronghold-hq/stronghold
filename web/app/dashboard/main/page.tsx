@@ -128,7 +128,7 @@ export default function DashboardPage() {
     );
   }
 
-  const isLowBalance = account.balance_usdc < 1;
+  const isLowBalance = Number(account.balance_usdc || "0") < 1_000_000;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">

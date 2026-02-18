@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"stronghold/internal/middleware"
+	"stronghold/internal/usdc"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -23,7 +24,7 @@ type PricingResponse struct {
 type RoutePrice struct {
 	Path        string  `json:"path"`
 	Method      string  `json:"method"`
-	Price       float64 `json:"price_usd"`
+	Price       usdc.MicroUSDC `json:"price_usd"`
 	Description string  `json:"description"`
 }
 

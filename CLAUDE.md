@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **CRITICAL: Do NOT commit or push unless explicitly told to do so.**
 
+- **NEVER commit directly to master.** Always create a feature branch and open a PR targeting master. Only commit to master if the user explicitly says to do so.
 - **ALWAYS run `go test ./...` and verify ALL tests pass before committing.** No exceptions. If Docker is not running, start it first. If tests fail, fix them before committing. Never commit with failing tests.
 - Make changes and verify they work locally first
 - Wait for explicit user approval before committing

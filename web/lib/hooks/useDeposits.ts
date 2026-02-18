@@ -5,9 +5,9 @@ import { API_URL, fetchWithAuth } from '@/lib/api';
 
 export interface Deposit {
   id: string;
-  amount_usdc: number;
-  fee_usdc: number;
-  net_usdc: number;
+  amount_usdc: string;
+  fee_usdc: string;
+  net_usdc: string;
   provider: 'stripe' | 'direct';
   status: 'pending' | 'completed' | 'failed';
   created_at: string;

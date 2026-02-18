@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"math/big"
 	"net/http"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
+	"stronghold/internal/usdc"
 	"stronghold/internal/wallet"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -66,7 +66,7 @@ func (m *X402Middleware) createFacilitatorRequest(method, url string, body []byt
 type PriceRoute struct {
 	Path   string
 	Method string
-	Price  float64
+	Price  usdc.MicroUSDC
 }
 
 // GetRoutes returns all priced routes
@@ -91,15 +91,15 @@ func (m *X402Middleware) GetNetworks() []string {
 }
 
 // RequirePayment returns middleware that requires x402 payment
-func (m *X402Middleware) RequirePayment(price float64) fiber.Handler {
+func (m *X402Middleware) RequirePayment(price usdc.MicroUSDC) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// Skip if no payment networks configured (allow all in dev mode)
 		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
-		// Convert price to wei (6 decimal places for USDC)
-		priceWei := decimalToWei(price)
+		// Convert MicroUSDC to on-chain atomic units (all supported chains use 6 decimals)
+		priceWei := price.ToBigInt("base")
 
 		// Check for payment header
 		paymentHeader := c.Get("X-Payment")
@@ -122,15 +122,15 @@ func (m *X402Middleware) RequirePayment(price float64) fiber.Handler {
 // AtomicPayment returns middleware that implements the reserve-commit pattern for atomic payments.
 // It ensures that either both service execution and payment settlement succeed, or neither does.
 // If settlement fails, a 503 is returned and the service result is not delivered.
-func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
+func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// Skip if no payment networks configured (allow all in dev mode)
 		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
-		// Convert price to wei (6 decimal places for USDC)
-		priceWei := decimalToWei(price)
+		// Convert MicroUSDC to on-chain atomic units (all supported chains use 6 decimals)
+		priceWei := price.ToBigInt("base")
 
 		// Check for payment header
 		paymentHeader := c.Get("X-Payment")
@@ -267,15 +267,15 @@ func (m *X402Middleware) AtomicPayment(price float64) fiber.Handler {
 
 // RequirePaymentAndSettle verifies payment, executes the handler, then settles payment.
 // This is used when database-backed atomic payments are not available.
-func (m *X402Middleware) RequirePaymentAndSettle(price float64) fiber.Handler {
+func (m *X402Middleware) RequirePaymentAndSettle(price usdc.MicroUSDC) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// Skip if no payment networks configured (allow all in dev mode)
 		if !m.config.HasPayments() {
 			return c.Next()
 		}
 
-		// Convert price to wei (6 decimal places for USDC)
-		priceWei := decimalToWei(price)
+		// Convert MicroUSDC to on-chain atomic units (all supported chains use 6 decimals)
+		priceWei := price.ToBigInt("base")
 
 		// Check for payment header
 		paymentHeader := c.Get("X-Payment")
@@ -600,14 +600,6 @@ func (m *X402Middleware) PaymentResponse(c fiber.Ctx, paymentID string) {
 	c.Set("X-Payment-Response", string(responseJSON))
 }
 
-// decimalToWei converts a dollar amount to USDC atomic units (6 decimals)
-// For example: $0.001 -> 1000 units, $1.00 -> 1000000 units
-func decimalToWei(amount float64) *big.Int {
-	// USDC has 6 decimals, so multiply by 10^6
-	units := int64(math.Round(amount * 1e6))
-	return big.NewInt(units)
-}
-
 // IsFreeRoute checks if a route doesn't require payment
 func (m *X402Middleware) IsFreeRoute(path string) bool {
 	freeRoutes := []string{
@@ -648,12 +640,12 @@ func (m *X402Middleware) Middleware() fiber.Handler {
 		// Check payment
 		paymentHeader := c.Get("X-Payment")
 		if paymentHeader == "" {
-			return m.requirePaymentResponse(c, decimalToWei(price))
+			return m.requirePaymentResponse(c, price.ToBigInt("base"))
 		}
 
-		valid, err := m.verifyPayment(paymentHeader, decimalToWei(price))
+		valid, err := m.verifyPayment(paymentHeader, price.ToBigInt("base"))
 		if err != nil || !valid {
-			return m.requirePaymentResponse(c, decimalToWei(price))
+			return m.requirePaymentResponse(c, price.ToBigInt("base"))
 		}
 
 		// Store payment header for settlement after successful handler
@@ -664,7 +656,7 @@ func (m *X402Middleware) Middleware() fiber.Handler {
 }
 
 // getPriceForRoute returns the price for a given route
-func (m *X402Middleware) getPriceForRoute(path, method string) float64 {
+func (m *X402Middleware) getPriceForRoute(path, method string) usdc.MicroUSDC {
 	routes := m.GetRoutes()
 	for _, route := range routes {
 		if strings.HasPrefix(path, route.Path) && method == route.Method {
