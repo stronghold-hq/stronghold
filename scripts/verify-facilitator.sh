@@ -53,6 +53,11 @@ MIN_SOL_LAMPORTS=10000000       # 0.01 SOL
 EVM_WALLET="${FACILITATOR_EVM_ADDRESS:-}"
 SOL_WALLET="${FACILITATOR_SOLANA_ADDRESS:-}"
 
+# Whether the facilitator is reachable via HTTP (set by early probe before flyctl checks).
+# When true, flyctl management-plane failures are downgraded to warnings since the CI
+# token may not have access to the facilitator app even though it's healthy.
+FACILITATOR_HTTP_HEALTHY=false
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 PASS_COUNT=0
@@ -118,6 +123,15 @@ if ! flyctl auth whoami &>/dev/null 2>&1; then
 fi
 pass "flyctl authenticated"
 
+# ── Early HTTP health probe ────────────────────────────────────────────────
+# Probe facilitator health via HTTP before flyctl checks. If the facilitator
+# is healthy, flyctl management-plane failures are downgraded to warnings
+# (the CI token may not have access to the facilitator Fly app).
+
+if curl -sf --max-time 10 "$FACILITATOR_URL/health" &>/dev/null; then
+    FACILITATOR_HTTP_HEALTHY=true
+fi
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. Fly.io Deployment Status
 # ══════════════════════════════════════════════════════════════════════════════
@@ -126,20 +140,28 @@ section "Fly.io Deployment Status"
 
 check_fly_app() {
     local app="$1"
+    local soft="${2:-false}"  # downgrade failures to warnings when true
     if flyctl status -a "$app" &>/dev/null 2>&1; then
         local state
         state=$(flyctl status -a "$app" --json 2>/dev/null | jq -r '.Machines[0].state // "unknown"' 2>/dev/null || echo "unknown")
         if [ "$state" = "started" ] || [ "$state" = "running" ]; then
             pass "$app is running (state: $state)"
+        elif [ "$soft" = true ]; then
+            warn "$app machine state: $state (HTTP health OK)" "Check app: flyctl status -a $app"
         else
             fail "$app machine state: $state" "Check app: flyctl status -a $app"
         fi
     else
-        fail "$app not found on Fly.io" "Deploy: flyctl deploy -a $app"
+        if [ "$soft" = true ]; then
+            warn "$app not accessible via flyctl (HTTP health OK — token may lack access)" \
+                "Grant FLY_API_TOKEN access to $app or use an org-scoped token"
+        else
+            fail "$app not found on Fly.io" "Deploy: flyctl deploy -a $app"
+        fi
     fi
 }
 
-check_fly_app "$FACILITATOR_APP"
+check_fly_app "$FACILITATOR_APP" "$FACILITATOR_HTTP_HEALTHY"
 check_fly_app "$API_APP"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -151,26 +173,28 @@ section "Fly.io Secrets — $FACILITATOR_APP"
 FACILITATOR_SECRETS=$(flyctl secrets list -a "$FACILITATOR_APP" --json 2>/dev/null || echo "[]")
 
 check_secret() {
-    local app="$1" name="$2" desc="$3" fix="$4" json="$5"
+    local app="$1" name="$2" desc="$3" fix="$4" json="$5" soft="${6:-false}"
     # flyctl secrets list --json uses lowercase "name" field
     if echo "$json" | jq -e ".[] | select(.name == \"$name\")" &>/dev/null; then
         pass "$desc"
+    elif [ "$soft" = true ]; then
+        warn "$desc — not verified (flyctl access limited)" "$fix"
     else
         fail "$desc — NOT SET" "$fix"
     fi
 }
 
 check_secret "$FACILITATOR_APP" "FACILITATOR_EVM_PRIVATE_KEY" "FACILITATOR_EVM_PRIVATE_KEY" \
-    "flyctl secrets set FACILITATOR_EVM_PRIVATE_KEY=0x... -a $FACILITATOR_APP" "$FACILITATOR_SECRETS"
+    "flyctl secrets set FACILITATOR_EVM_PRIVATE_KEY=0x... -a $FACILITATOR_APP" "$FACILITATOR_SECRETS" "$FACILITATOR_HTTP_HEALTHY"
 
 check_secret "$FACILITATOR_APP" "FACILITATOR_SOLANA_PRIVATE_KEY" "FACILITATOR_SOLANA_PRIVATE_KEY" \
-    "flyctl secrets set FACILITATOR_SOLANA_PRIVATE_KEY=... -a $FACILITATOR_APP" "$FACILITATOR_SECRETS"
+    "flyctl secrets set FACILITATOR_SOLANA_PRIVATE_KEY=... -a $FACILITATOR_APP" "$FACILITATOR_SECRETS" "$FACILITATOR_HTTP_HEALTHY"
 
 check_secret "$FACILITATOR_APP" "RPC_URL_BASE" "RPC_URL_BASE" \
-    "flyctl secrets set RPC_URL_BASE=https://base-mainnet.g.alchemy.com/v2/KEY -a $FACILITATOR_APP" "$FACILITATOR_SECRETS"
+    "flyctl secrets set RPC_URL_BASE=https://base-mainnet.g.alchemy.com/v2/KEY -a $FACILITATOR_APP" "$FACILITATOR_SECRETS" "$FACILITATOR_HTTP_HEALTHY"
 
 check_secret "$FACILITATOR_APP" "RPC_URL_SOLANA" "RPC_URL_SOLANA" \
-    "flyctl secrets set RPC_URL_SOLANA=https://mainnet.helius-rpc.com/?api-key=KEY -a $FACILITATOR_APP" "$FACILITATOR_SECRETS"
+    "flyctl secrets set RPC_URL_SOLANA=https://mainnet.helius-rpc.com/?api-key=KEY -a $FACILITATOR_APP" "$FACILITATOR_SECRETS" "$FACILITATOR_HTTP_HEALTHY"
 
 section "Fly.io Secrets — $API_APP"
 
