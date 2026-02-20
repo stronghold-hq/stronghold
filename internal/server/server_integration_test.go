@@ -422,6 +422,15 @@ func TestIntegration_AccountManagement(t *testing.T) {
 
 }
 
+func TestSetupRoutes_PanicsWithoutDatabase(t *testing.T) {
+	s := &Server{
+		app: fiber.New(),
+	}
+	assert.Panics(t, func() {
+		s.setupRoutes()
+	})
+}
+
 func TestIntegration_MultipleSessionsLogout(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)

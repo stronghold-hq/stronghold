@@ -57,7 +57,7 @@ func (db *DB) CreatePaymentTransaction(ctx context.Context, tx *PaymentTransacti
 		RETURNING id, created_at
 	`
 
-	err := db.pool.QueryRow(ctx, query,
+	err := db.QueryRow(ctx, query,
 		tx.PaymentNonce,
 		tx.PaymentHeader,
 		tx.PayerAddress,
@@ -93,7 +93,7 @@ func (db *DB) CreateOrGetPaymentTransaction(ctx context.Context, tx *PaymentTran
 		RETURNING id, created_at
 	`
 
-	err := db.pool.QueryRow(ctx, query,
+	err := db.QueryRow(ctx, query,
 		tx.PaymentNonce,
 		tx.PaymentHeader,
 		tx.PayerAddress,
@@ -135,7 +135,7 @@ func (db *DB) GetPaymentByNonce(ctx context.Context, nonce string) (*PaymentTran
 
 	var tx PaymentTransaction
 	var serviceResultJSON []byte
-	err := db.pool.QueryRow(ctx, query, nonce).Scan(
+	err := db.QueryRow(ctx, query, nonce).Scan(
 		&tx.ID,
 		&tx.PaymentNonce,
 		&tx.PaymentHeader,
@@ -181,7 +181,7 @@ func (db *DB) GetPaymentByID(ctx context.Context, id uuid.UUID) (*PaymentTransac
 
 	var tx PaymentTransaction
 	var serviceResultJSON []byte
-	err := db.pool.QueryRow(ctx, query, id).Scan(
+	err := db.QueryRow(ctx, query, id).Scan(
 		&tx.ID,
 		&tx.PaymentNonce,
 		&tx.PaymentHeader,
@@ -223,7 +223,7 @@ func (db *DB) TransitionStatus(ctx context.Context, id uuid.UUID, from, to Payme
 		WHERE id = $1 AND status = $2
 	`
 
-	result, err := db.pool.Exec(ctx, query, id, from, to)
+	result, err := db.ExecResult(ctx, query, id, from, to)
 	if err != nil {
 		return fmt.Errorf("failed to transition status: %w", err)
 	}
@@ -250,7 +250,7 @@ func (db *DB) RecordExecution(ctx context.Context, id uuid.UUID, result map[stri
 		WHERE id = $1 AND status = $3
 	`
 
-	res, err := db.pool.Exec(ctx, query, id, resultJSON, PaymentStatusExecuting)
+	res, err := db.ExecResult(ctx, query, id, resultJSON, PaymentStatusExecuting)
 	if err != nil {
 		return fmt.Errorf("failed to record execution: %w", err)
 	}
@@ -270,7 +270,7 @@ func (db *DB) CompleteSettlement(ctx context.Context, id uuid.UUID, facilitatorP
 		WHERE id = $1 AND status IN ($4, $5)
 	`
 
-	result, err := db.pool.Exec(ctx, query, id, PaymentStatusCompleted, facilitatorPaymentID, PaymentStatusSettling, PaymentStatusFailed)
+	result, err := db.ExecResult(ctx, query, id, PaymentStatusCompleted, facilitatorPaymentID, PaymentStatusSettling, PaymentStatusFailed)
 	if err != nil {
 		return fmt.Errorf("failed to complete settlement: %w", err)
 	}
@@ -290,7 +290,7 @@ func (db *DB) FailSettlement(ctx context.Context, id uuid.UUID, errorMsg string)
 		WHERE id = $1 AND status = $4
 	`
 
-	_, err := db.pool.Exec(ctx, query, id, PaymentStatusFailed, errorMsg, PaymentStatusSettling)
+	err := db.Exec(ctx, query, id, PaymentStatusFailed, errorMsg, PaymentStatusSettling)
 	if err != nil {
 		return fmt.Errorf("failed to record settlement failure: %w", err)
 	}
@@ -379,7 +379,7 @@ func (db *DB) ExpireStaleReservations(ctx context.Context) (int64, error) {
 		   OR (status = $3 AND created_at < NOW() - INTERVAL '5 minutes')
 	`
 
-	result, err := db.pool.Exec(ctx, query, PaymentStatusExpired, PaymentStatusReserved, PaymentStatusExecuting)
+	result, err := db.ExecResult(ctx, query, PaymentStatusExpired, PaymentStatusReserved, PaymentStatusExecuting)
 	if err != nil {
 		return 0, fmt.Errorf("failed to expire stale reservations: %w", err)
 	}
@@ -400,7 +400,7 @@ func (db *DB) LinkUsageLog(ctx context.Context, usageLogID, paymentTxID uuid.UUI
 		WHERE id = $1
 	`
 
-	_, err := db.pool.Exec(ctx, query, usageLogID, paymentTxID)
+	err := db.Exec(ctx, query, usageLogID, paymentTxID)
 	if err != nil {
 		return fmt.Errorf("failed to link usage log: %w", err)
 	}

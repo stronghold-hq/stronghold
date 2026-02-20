@@ -148,31 +148,6 @@ func TestAtomicPayment_RequiresDBWhenPaymentsEnabled(t *testing.T) {
 	assert.Equal(t, "Payment middleware misconfigured", body["error"])
 }
 
-func TestRequirePayment_DevModeBypass(t *testing.T) {
-	cfg := &config.X402Config{
-		EVMWalletAddress: "", // Dev mode
-		FacilitatorURL:   "https://x402.org/facilitator",
-		Networks:         []string{"base-sepolia"},
-	}
-	pricing := &config.PricingConfig{
-		ScanContent: usdc.MicroUSDC(1000),
-	}
-
-	m := NewX402Middleware(cfg, pricing)
-
-	app := fiber.New()
-	app.Post("/v1/scan", m.RequirePayment(usdc.MicroUSDC(1000)), func(c fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
-	})
-
-	req := httptest.NewRequest("POST", "/v1/scan", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, 200, resp.StatusCode)
-}
-
 func TestIsFreeRoute(t *testing.T) {
 	cfg := &config.X402Config{
 		EVMWalletAddress: "0x1234567890123456789012345678901234567890",

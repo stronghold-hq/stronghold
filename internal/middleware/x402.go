@@ -91,32 +91,6 @@ func (m *X402Middleware) GetNetworks() []string {
 	return m.config.Networks
 }
 
-// RequirePayment returns middleware that requires x402 payment
-func (m *X402Middleware) RequirePayment(price usdc.MicroUSDC) fiber.Handler {
-	return func(c fiber.Ctx) error {
-		// Skip if no payment networks configured (allow all in dev mode)
-		if !m.config.HasPayments() {
-			return c.Next()
-		}
-
-		// Check for payment header
-		paymentHeader := c.Get("X-Payment")
-		if paymentHeader == "" {
-			// Return 402 with payment requirements
-			return m.requirePaymentResponse(c, price)
-		}
-
-		// Verify payment
-		valid, err := m.verifyPayment(paymentHeader, price)
-		if err != nil || !valid {
-			return m.requirePaymentResponse(c, price)
-		}
-
-		// Payment valid, continue
-		return c.Next()
-	}
-}
-
 // AtomicPayment returns middleware that implements the reserve-commit pattern for atomic payments.
 // It ensures that either both service execution and payment settlement succeed, or neither does.
 // If settlement fails, a 503 is returned and the service result is not delivered.
@@ -185,9 +159,10 @@ func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 			// If payment is in another state (reserved, executing, settling, failed),
 			// treat as conflict - another request is processing this payment
 			if paymentTx.Status != db.PaymentStatusExpired {
+				slog.Warn("duplicate payment nonce with in-progress status",
+					"nonce", paymentTx.PaymentNonce, "status", string(paymentTx.Status))
 				return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-					"error":  "Payment already in progress",
-					"status": string(paymentTx.Status),
+					"error": "Payment already in progress",
 				})
 			}
 			// Expired payment - allow retry with new transaction
@@ -211,8 +186,8 @@ func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 		// Execute the handler
 		if err := c.Next(); err != nil {
 			// Handler failed - expire the reservation
-			if paymentTx != nil {
-				_ = m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusExpired)
+			if expireErr := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusExpired); expireErr != nil {
+				slog.Warn("failed to expire payment after handler error", "payment_id", paymentTx.ID, "error", expireErr)
 			}
 			return err
 		}
@@ -220,25 +195,23 @@ func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 		// Check if handler returned an error status
 		if c.Response().StatusCode() >= 400 {
 			// Service returned an error - expire the reservation
-			if paymentTx != nil {
-				_ = m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusExpired)
+			if expireErr := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusExpired); expireErr != nil {
+				slog.Warn("failed to expire payment after error response", "payment_id", paymentTx.ID, "error", expireErr)
 			}
 			return nil
 		}
 
 		// Transition to settling and attempt settlement
-		if paymentTx != nil {
-			if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusSettling); err != nil {
-				slog.Error("failed to transition payment to settling", "error", err)
-			}
+		if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusSettling); err != nil {
+			slog.Error("failed to transition payment to settling", "error", err)
 		}
 
 		// Settle payment (blocking)
 		paymentID, err := m.settlePayment(paymentHeader)
 		if err != nil {
 			slog.Error("failed to settle payment", "error", err)
-			if paymentTx != nil {
-				_ = m.db.FailSettlement(c.Context(), paymentTx.ID, err.Error())
+			if failErr := m.db.FailSettlement(c.Context(), paymentTx.ID, err.Error()); failErr != nil {
+				slog.Warn("failed to record settlement failure", "payment_id", paymentTx.ID, "error", failErr)
 			}
 			// Return 503 - payment not settled, service result not returned
 			// Clear the response body that was set by the handler
@@ -251,10 +224,8 @@ func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 		}
 
 		// Mark completed
-		if paymentTx != nil {
-			if err := m.db.CompleteSettlement(c.Context(), paymentTx.ID, paymentID); err != nil {
-				slog.Error("failed to mark payment as completed", "error", err)
-			}
+		if err := m.db.CompleteSettlement(c.Context(), paymentTx.ID, paymentID); err != nil {
+			slog.Error("failed to mark payment as completed", "error", err)
 		}
 
 		m.PaymentResponse(c, paymentID)

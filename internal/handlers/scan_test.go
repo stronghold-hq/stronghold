@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"stronghold/internal/config"
+	"stronghold/internal/db"
 	"stronghold/internal/middleware"
 	"stronghold/internal/usdc"
 
@@ -340,4 +341,38 @@ func TestScan_RequestIDInErrorResponse(t *testing.T) {
 
 	assert.Contains(t, body, "request_id")
 	assert.NotEmpty(t, body["request_id"])
+}
+
+func TestScanHandler_RegisterRoutes_PanicsWithoutDB(t *testing.T) {
+	x402cfg := &config.X402Config{
+		EVMWalletAddress: "0x1234567890123456789012345678901234567890",
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
+	}
+	pricing := &config.PricingConfig{
+		ScanContent: usdc.MicroUSDC(1000),
+		ScanOutput:  usdc.MicroUSDC(1000),
+	}
+	x402 := middleware.NewX402Middleware(x402cfg, pricing)
+
+	handler := NewScanHandlerWithDB(nil, x402, nil, pricing)
+	app := fiber.New()
+
+	assert.Panics(t, func() {
+		handler.RegisterRoutes(app)
+	})
+}
+
+func TestScanHandler_RegisterRoutes_PanicsWithoutX402(t *testing.T) {
+	pricing := &config.PricingConfig{
+		ScanContent: usdc.MicroUSDC(1000),
+		ScanOutput:  usdc.MicroUSDC(1000),
+	}
+
+	handler := NewScanHandlerWithDB(nil, nil, &db.DB{}, pricing)
+	app := fiber.New()
+
+	assert.Panics(t, func() {
+		handler.RegisterRoutes(app)
+	})
 }
