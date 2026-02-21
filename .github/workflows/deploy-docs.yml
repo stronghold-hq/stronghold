@@ -9,7 +9,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy Docs to Cloudflare Pages
+    name: Build and Deploy Docs
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,8 +37,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy docs-site/dist --project-name=stronghold-docs
+          command: pages deploy docs-site/dist --project-name=stronghold-docs --branch=production
 
       - name: Output deployment URL
         run: |
-          echo "Docs deployed to: https://docs.getstronghold.xyz"
+          echo "✅ Docs deployed to: https://docs.getstronghold.xyz"
