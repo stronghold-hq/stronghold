@@ -61,3 +61,8 @@ web/out/
 web/dist/
 web/node_modules/
 web/*.log
+
+# Docs site build output
+docs-site/node_modules/
+docs-site/dist/
+docs-site/.astro/
