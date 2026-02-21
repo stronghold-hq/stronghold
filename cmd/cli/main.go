@@ -263,7 +263,7 @@ Available scanning keys:
 		Long: `Show deposit options to add funds to your account.
 
 You can deposit via:
-  - Dashboard: Use Stripe, Coinbase Pay, or Moonpay (recommended)
+  - Dashboard: Use Stripe to purchase USDC with a card (recommended)
   - Direct: Send USDC on Base (EVM) or Solana to your wallet address
 
 Both Base and Solana deposit addresses are shown if configured.`,

@@ -46,6 +46,15 @@ The platform provides 4-layer security scanning: heuristics, ML classification (
 
 If you catch yourself about to type `npm`, `npx`, `yarn`, or `pnpm` — STOP and use `bun` instead.
 
+## No Python
+
+**CRITICAL: Never use Python for anything unless the user explicitly tells you to.**
+
+- Use shell tools (`jq`, `sed`, `awk`, `grep`, etc.) for data processing and scripting tasks
+- Use `jq` for JSON parsing — not Python
+- Use dedicated Claude Code tools (Read, Grep, Glob) instead of writing Python scripts to explore the codebase
+- The only exception is when the user explicitly asks you to use Python
+
 ## Build Commands
 
 ```bash

@@ -1,0 +1,106 @@
+---
+title: Health Checks
+description: API health check endpoints for monitoring and orchestration.
+---
+
+Stronghold exposes three health check endpoints. None of them require authentication.
+
+## GET /health
+
+Full health status including service dependency checks.
+
+```bash
+curl https://api.getstronghold.xyz/health
+```
+
+### Response (200)
+
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "services": {
+    "api": "up",
+    "database": "up",
+    "x402": "up"
+  },
+  "timestamp": 1708300000
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | `"healthy"` when all dependencies are up, `"degraded"` if any dependency is unhealthy |
+| `version` | string | API server version |
+| `services` | object | Per-service status (see values below) |
+| `timestamp` | number | Unix timestamp of the check |
+
+### Service status values
+
+| Value | Meaning |
+|-------|---------|
+| `"up"` | Service is healthy and reachable |
+| `"down"` | Service is unreachable or failing health checks (database) |
+| `"not_configured"` | Service is not configured (e.g. no database or no facilitator URL set) |
+| `"unreachable"` | HTTP connection to the service failed (x402 facilitator) |
+| `"error"` | Service responded with a 5xx status code (x402 facilitator) |
+
+Any status other than `"up"` causes the overall status to become `"degraded"`.
+
+## GET /health/live
+
+Kubernetes **liveness** probe. Returns `200` if the API process is running. This endpoint
+does not check downstream dependencies.
+
+```bash
+curl https://api.getstronghold.xyz/health/live
+```
+
+### Response (200)
+
+```json
+{"status": "alive"}
+```
+
+## GET /health/ready
+
+Kubernetes **readiness** probe. Returns `200` if the database and x402 facilitator are
+reachable. Returns `503` if any required dependency is unavailable.
+
+```bash
+curl https://api.getstronghold.xyz/health/ready
+```
+
+### Response (200)
+
+```json
+{"status": "ready"}
+```
+
+### Response (503)
+
+Database unavailable:
+
+```json
+{
+  "status": "not_ready",
+  "reason": "database_unavailable",
+  "database": "down"
+}
+```
+
+x402 facilitator unavailable:
+
+```json
+{
+  "status": "not_ready",
+  "reason": "x402_unavailable",
+  "x402": "unreachable"
+}
+```
+
+The `x402` field will contain one of the non-`"up"` service status values described
+above (e.g. `"unreachable"`, `"error"`, `"not_configured"`).
+
+Use `/health/ready` in load balancer health checks and Kubernetes readiness probes to
+prevent routing traffic to instances that cannot serve requests.

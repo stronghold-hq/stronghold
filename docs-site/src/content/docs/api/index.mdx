@@ -1,0 +1,82 @@
+---
+title: API Overview
+description: Base URL, authentication model, and general API conventions.
+slug: api
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Base URL
+
+All API requests use the following base URL:
+
+```
+https://api.getstronghold.xyz
+```
+
+## Authentication
+
+Stronghold does not use API keys. Instead, every protected endpoint is gated by the
+[x402 protocol](https://x402.org/) — an open standard for HTTP-native crypto payments.
+
+Each request includes a signed USDC payment in the `X-PAYMENT` header. The payment is
+verified on-chain before the request is processed. Payments are supported on **Base** (EVM)
+and **Solana**.
+
+## Endpoint Summary
+
+### Public endpoints (no payment required)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Full health status with dependency checks |
+| `/health/live` | GET | Kubernetes liveness probe |
+| `/health/ready` | GET | Kubernetes readiness probe |
+| `/v1/pricing` | GET | Endpoint pricing information |
+
+### Protected endpoints (x402 payment required)
+
+| Endpoint | Method | Price | Description |
+|----------|--------|-------|-------------|
+| `/v1/scan/content` | POST | $0.001 | Prompt injection detection |
+| `/v1/scan/output` | POST | $0.001 | Credential leak detection |
+
+## Conventions
+
+### Content type
+
+All request and response bodies use `application/json`. Set the `Content-Type` header
+accordingly on every request that includes a body.
+
+### Decisions
+
+Scan endpoints return a `decision` field with one of three values:
+
+| Decision | Meaning |
+|----------|---------|
+| `ALLOW` | Content is safe to process |
+| `WARN` | Suspicious patterns detected -- review before processing |
+| `BLOCK` | Active threat detected -- discard content immediately |
+
+### Payload limit
+
+The maximum text size accepted by scan endpoints is **500 KB**.
+
+### Money format
+
+Canonical money fields are **string-encoded microUSDC integers**.
+
+- 1 microUSDC = 0.000001 USDC
+- `"1000"` = 1000 microUSDC = **$0.001**
+
+Convenience float fields like `price_usd` may appear alongside the canonical value, but
+integrations should always use the string-encoded microUSDC field as the source of truth.
+
+<Aside type="caution" title="Breaking change — February 18, 2026">
+Money fields moved from JSON numbers to **string-encoded microUSDC integers**. If your
+integration parses money values as numbers, update it to expect strings.
+</Aside>
+
+<Aside type="tip" title="Interactive API Explorer">
+Want to explore the API interactively? Visit the [API Explorer](https://api.getstronghold.xyz/docs) for a Scalar-rendered OpenAPI spec.
+</Aside>

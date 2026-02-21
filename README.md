@@ -340,7 +340,7 @@ stronghold account deposit    # Display deposit options
 
 ### Deposit Methods
 
-- **Dashboard**: Stripe, Coinbase Pay, or Moonpay
+- **Dashboard**: Stripe (card to USDC)
 - **Direct Transfer**: Send USDC on Base to your account address
 
 ### Pricing

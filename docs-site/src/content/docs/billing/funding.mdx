@@ -1,0 +1,50 @@
+---
+title: "Funding Your Account"
+description: "How to add funds to your Stronghold account via Stripe or direct crypto transfer."
+---
+
+Stronghold requires USDC in your wallet to pay for scans. There are two ways to fund your account.
+
+## Option 1: Dashboard (Recommended)
+
+Visit the [dashboard](https://dashboard.stronghold.security) to fund your wallet through a web interface. The dashboard supports:
+
+- **Stripe** — pay with a credit or debit card (fiat-to-USDC on-ramp)
+
+The Stripe integration converts your payment into USDC and delivers it to your wallet on-chain. This is **not** a separate payment method — all API payments still use x402. Stripe only handles the initial funding step.
+
+> **Note:** Stripe requires a linked wallet address (Base or Solana) before you can initiate a purchase. Link your wallet via the dashboard or with `stronghold wallet link` before depositing.
+
+## Option 2: Direct USDC Transfer
+
+Send USDC directly to your wallet address on **Base** (EVM) or **Solana**. Direct transfers are detected and credited automatically after blockchain confirmation.
+
+To view your deposit addresses, run `stronghold account deposit`. This displays your Base (EVM) and Solana wallet addresses (if configured) along with instructions:
+
+```bash
+stronghold account deposit
+```
+
+## Checking Your Balance
+
+Use the CLI to check your balance across all configured wallets:
+
+```bash
+stronghold account balance
+```
+
+Output shows per-chain balances:
+
+```
+Base (EVM) Wallet:
+  0x1234...5678
+  Balance: 4.500000 USDC
+
+Solana Wallet:
+  ABC123...XYZ
+  Balance: 2.000000 USDC
+```
+
+## Low Balance Warning
+
+The web dashboard displays a warning when your wallet balance drops below **1 USDC**. At $0.001 per scan, 1 USDC covers approximately 1,000 requests — so this warning gives you time to top up before running out.

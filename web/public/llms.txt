@@ -227,7 +227,7 @@ Decisions: ALLOW (safe), WARN (review), BLOCK (reject)
 Both proxy and API require a funded account:
 
 1. **Create account**: https://stronghold.security/dashboard or `stronghold init`
-2. **Deposit USDC**: Via dashboard (Stripe, Coinbase Pay) or direct transfer on Base or Solana
+2. **Deposit USDC**: Via dashboard (Stripe) or direct transfer on Base or Solana
 3. **Pay-per-request**: $0.001 per scan
 
 Payment networks: Base (EVM) and Solana. Both use USDC.
@@ -265,6 +265,6 @@ If you choose to upload your wallet to the server, **TOTP is required**.
 ## Links
 
 - Documentation: https://github.com/yv-was-taken/stronghold
-- API Docs: https://api.getstronghold.xyz/docs
+- API Docs: https://docs.getstronghold.xyz
 - Dashboard: https://stronghold.security/dashboard
 - Full Reference: https://stronghold.security/llms-full.txt

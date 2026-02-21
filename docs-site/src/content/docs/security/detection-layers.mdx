@@ -1,0 +1,93 @@
+---
+title: "Detection Layers"
+description: "The four-layer scanning pipeline — heuristics, ML, semantics, and LLM."
+---
+
+Stronghold scans content through a **four-layer pipeline**, ordered from fastest to slowest. Each layer adds a different detection capability, and their scores combine into a final decision.
+
+## Pipeline Overview
+
+| Layer | Method | Speed | Description |
+|-------|--------|-------|-------------|
+| Heuristic | Pattern matching, keyword weights | &lt;1ms | Detects known injection patterns, DAN jailbreaks, system prompt extraction |
+| ML | Citadel via Hugot ONNX backend | ~5ms | BERT-based binary classification (INJECTION vs BENIGN) |
+| Semantic | Embedding similarity search | ~10ms | Compares content against known attack embeddings |
+| LLM | Optional analysis via OpenRouter | ~500ms | Final classification for ambiguous cases (requires config) |
+
+:::note[Implementation detail]
+When the hybrid detector is active, all layers run as a single invocation through Citadel's `HybridDetector`. When only heuristic scanning is available (no semantic/LLM configuration), the scanner falls back to a standalone heuristic-only mode with `ml_confidence: 0.0` and `semantic: 0.0`.
+:::
+
+## Scoring and Thresholds
+
+Each layer produces a score between **0.0** and **1.0**. These scores are combined into a final decision using the following thresholds:
+
+| Decision | Condition | Default Threshold |
+|----------|-----------|-------------------|
+| **BLOCK** | Combined score >= threshold | 0.55 |
+| **WARN** | Combined score >= threshold | 0.35 |
+| **ALLOW** | Combined score &lt; warn threshold | &lt; 0.35 |
+
+Thresholds are configurable via environment variables:
+
+- `STRONGHOLD_BLOCK_THRESHOLD` — score at or above which content is blocked (default: `0.55`)
+- `STRONGHOLD_WARN_THRESHOLD` — score at or above which a warning is issued (default: `0.35`)
+
+These thresholds are applied directly in heuristic-only mode. When the hybrid detector is active, Citadel makes its own BLOCK/WARN/ALLOW decision internally using these thresholds as configuration.
+
+## Layer 1: Heuristic
+
+The heuristic layer uses Citadel's `ThreatScorer` with weighted keyword matching. It runs in under a millisecond and catches well-known attack patterns:
+
+- "Ignore previous instructions" and variants
+- DAN jailbreak patterns
+- "Act as" / "pretend to be" roleplay triggers
+- System prompt extraction phrases ("repeat your instructions", "what is your system prompt")
+- Markdown image exfiltration patterns
+- High-entropy payloads (potential encoded attacks)
+
+This layer is fast enough to run on every request with negligible latency impact.
+
+## Layer 2: ML Classification
+
+The ML layer uses Citadel's `HybridDetector`, which runs ONNX inference locally via the [Hugot](https://github.com/knights-analytics/hugot) backend. Hugot is the Go ONNX runtime that Citadel uses under the hood to run a BERT-based model trained on prompt injection datasets. It classifies content as either **INJECTION** or **BENIGN** with a confidence score.
+
+Key characteristics:
+- Runs entirely locally — no external API calls
+- ~5ms per classification
+- Catches attacks that do not match known keyword patterns
+- The ML classification layer runs automatically as part of Citadel's hybrid detector. It cannot be independently toggled.
+
+## Layer 3: Semantic Similarity
+
+The semantic layer computes embedding similarity between the input content and a database of known attack vectors. This catches **paraphrased attacks** that keyword matching misses — for example, an attacker who rephrases "ignore your instructions" as "disregard the directives you were given".
+
+Key characteristics:
+- ~10ms per comparison
+- Effective against novel phrasings of known attack types
+- Enabled by default (`STRONGHOLD_ENABLE_SEMANTICS=true`)
+
+## Layer 4: LLM Classification (Optional)
+
+The LLM layer sends ambiguous content to an external language model via **OpenRouter** for nuanced classification. This is the most accurate but also the slowest and most expensive layer.
+
+This layer is **disabled by default** and requires explicit configuration:
+
+- `STRONGHOLD_LLM_PROVIDER` — the OpenRouter model to use (e.g., `anthropic/claude-sonnet-4`, `openai/gpt-4o`)
+- `STRONGHOLD_LLM_API_KEY` — your OpenRouter API key
+
+When enabled, this layer only runs for content that earlier layers flagged as ambiguous (scores in the WARN range). Clear BLOCK or ALLOW decisions from earlier layers skip the LLM entirely.
+
+When this layer is disabled (the default), the `ml_confidence` score in the response will be `0.0`. This score only reflects the LLM layer's confidence and is distinct from the ONNX/Hugot ML classification in Layer 2.
+
+## Output Scanning
+
+Output scanning (credential detection) uses a separate pipeline based on Citadel's `OutputScanner`. It uses pattern-based detection for:
+
+- API keys and tokens (AWS, GCP, GitHub, Stripe, etc.)
+- Passwords and secrets
+- Database connection strings
+- Private keys (SSH, PGP, cryptocurrency)
+- Environment variable dumps
+
+Output scanning does not use the four-layer pipeline described above — it relies on purpose-built pattern matching optimized for secret detection.

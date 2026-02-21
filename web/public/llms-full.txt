@@ -678,7 +678,7 @@ stronghold account deposit
 ```
 
 Shows deposit addresses for both chains:
-- **Dashboard**: Stripe, Coinbase Pay, or Moonpay (recommended)
+- **Dashboard**: Stripe (recommended)
 - **Direct Base**: Send USDC on Base to your EVM wallet address
 - **Direct Solana**: Send USDC on Solana to your Solana wallet address
 
@@ -789,6 +789,6 @@ See `.env.example` for full configuration documentation.
 ## Links
 
 - GitHub: https://github.com/yv-was-taken/stronghold
-- API Docs: https://api.getstronghold.xyz/docs
+- API Docs: https://docs.getstronghold.xyz
 - Dashboard: https://stronghold.security/dashboard
 - Quick Reference: https://stronghold.security/llms.txt

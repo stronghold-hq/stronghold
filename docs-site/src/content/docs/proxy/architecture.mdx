@@ -1,0 +1,90 @@
+---
+title: "Architecture"
+description: "How the transparent proxy intercepts and scans traffic."
+---
+
+## Overview
+
+The Stronghold transparent proxy sits between the application and the internet at the network level. All HTTP and HTTPS traffic is intercepted by the kernel and routed through the proxy for scanning before it reaches the application.
+
+```
+Agent (any app) -> Kernel (iptables/pf) -> Stronghold Proxy (:8402)
+                                              |
+                                    Fetch -> Scan -> Return
+                                           ALLOW / WARN / BLOCK
+```
+
+## Kernel-Level Interception
+
+The proxy listens on **localhost:8402**. Firewall rules redirect all outbound HTTP (port 80) and HTTPS (port 443) traffic to this local port:
+
+- **Linux**: iptables or nftables `REDIRECT` rules in the `nat` table
+- **macOS**: pf `rdr-to` rules
+
+Applications are unaware of the proxy. From their perspective, they connect directly to the destination server. The kernel silently redirects the connection.
+
+## Dedicated System User
+
+The proxy runs under a dedicated `stronghold` system user (or `_stronghold` on macOS). Firewall rules use **UID-based matching** to exclude this user's traffic from redirection.
+
+This prevents infinite loops: when the proxy fetches content from the actual destination server, its outbound connections must not be redirected back to itself. The UID-based exclusion ensures the proxy's own traffic passes through directly while all other traffic is intercepted.
+
+## HTTP Traffic Flow
+
+For plain HTTP requests:
+
+1. Application makes an HTTP request to a remote server
+2. Kernel redirects the TCP connection to the proxy on port 8402
+3. Proxy reads the request and determines the original destination
+4. Proxy fetches the content from the destination server
+5. Proxy sends the response body to the Stronghold API for scanning
+6. Based on the scan result, the proxy either returns the response to the application (with scan headers) or blocks it with a 403
+
+## HTTPS Traffic Flow (MITM)
+
+For HTTPS requests, the proxy performs a man-in-the-middle (MITM) interception:
+
+1. Application initiates a TLS connection to a remote server
+2. Kernel redirects the connection to the proxy
+3. Proxy generates a certificate for the requested domain, signed by the Stronghold CA
+4. Proxy completes the TLS handshake with the application using this generated certificate
+5. Proxy opens a separate TLS connection to the actual destination server
+6. Proxy decrypts the request, fetches the response, scans it, and re-encrypts the response back to the application
+
+### CA Certificate
+
+During `stronghold init`, a CA (Certificate Authority) key pair is generated and stored at `~/.stronghold/ca/`:
+
+- `ca.crt` -- the CA certificate (added to the system trust store)
+- `ca.key` -- the CA private key (used to sign per-domain certificates)
+
+The CA certificate is automatically added to the system trust store so that applications accept the proxy's generated certificates.
+
+### Per-Domain Certificate Cache
+
+The proxy maintains an in-memory cache of generated certificates, keyed by domain name. The first request to a new domain incurs a certificate generation cost (~1ms). Subsequent requests to the same domain reuse the cached certificate.
+
+## Content Filtering
+
+Not all traffic needs scanning. The proxy applies filtering to avoid unnecessary overhead:
+
+### Content Type Filtering
+
+Only text-based content is scanned. The full list of scannable MIME types:
+
+- `text/html`, `text/plain`, `text/markdown`
+- `application/json`, `application/xml`, `text/xml`
+- `application/javascript`, `text/javascript`
+- `text/css`
+
+Binary content (images, videos, executables, archives) is **streamed directly** to the application without scanning.
+
+### Size Limits
+
+Content larger than **1 MB** is streamed directly without scanning. This prevents the proxy from buffering excessively large responses in memory.
+
+## Fail-Open Behavior
+
+By default, the proxy operates in **fail-open** mode: if the Stronghold scan API is unreachable (network issues, API downtime), traffic passes through unscanned rather than being blocked.
+
+This can be changed to fail-closed via the configuration file. See [Configuration](/proxy/configuration) for details.

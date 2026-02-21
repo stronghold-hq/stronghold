@@ -1,0 +1,112 @@
+---
+title: "POST /v1/scan/output"
+description: Scan agent output for credential leaks before delivery to users.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Endpoint
+
+```
+POST /v1/scan/output
+```
+
+**Price:** $0.001 per request (1000 microUSDC)
+**Payment:** x402 via `X-PAYMENT` header
+
+<Aside type="tip">
+This is the **recommended API endpoint** for direct integration. Use it to scan agent
+responses before sending them to users.
+</Aside>
+
+## Use case
+
+Scan agent output to catch sensitive data before it reaches end users:
+
+- API keys and tokens
+- Passwords and database connection strings
+- Private keys (SSH, PGP, crypto wallets)
+- AWS credentials (`AKIA...`)
+- Environment variable dumps
+
+## Request body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `text` | string | Yes | Agent output text to scan (max 500 KB) |
+
+## Example request
+
+```bash
+curl -X POST https://api.getstronghold.xyz/v1/scan/output \
+  -H "Content-Type: application/json" \
+  -H "X-PAYMENT: <x402-payment-header>" \
+  -d '{
+    "text": "Here is the configuration:\nDB_PASSWORD=secret123\nAWS_SECRET_KEY=AKIA..."
+  }'
+```
+
+## Response (200)
+
+```json
+{
+  "decision": "BLOCK",
+  "scores": {
+    "credential_score": 0.95,
+    "findings_count": 2
+  },
+  "reason": "Possible credential leak detected; AWS secret key pattern",
+  "latency_ms": 12,
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "metadata": {
+    "findings": 2,
+    "risk_level": "HIGH",
+    "is_safe": false,
+    "categories": ["aws_credentials", "database_password"]
+  },
+  "threats_found": [
+    {
+      "category": "aws_credentials",
+      "pattern": "AWS_SECRET_KEY",
+      "location": "",
+      "severity": "high",
+      "description": "AWS secret access key detected"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `decision` | string | `"ALLOW"`, `"WARN"`, or `"BLOCK"` |
+| `scores.credential_score` | number | Credential detection risk score (0.0 -- 1.0) |
+| `scores.findings_count` | number | Number of individual credential findings |
+| `reason` | string | Human-readable explanation of the decision |
+| `latency_ms` | number | Processing time in milliseconds |
+| `request_id` | string | Unique request identifier for tracing |
+| `metadata` | object | Detection context including `findings` count, `risk_level`, `is_safe` boolean, and `categories` list. |
+| `threats_found` | array | List of `Threat` objects describing each detected credential leak. Omitted when empty. |
+
+### Threat object
+
+Each entry in `threats_found` has the following shape:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `category` | string | Credential category, e.g. `"aws_credentials"`, `"database_password"`, `"private_key"` |
+| `pattern` | string | The specific pattern name that matched |
+| `location` | string | Where in the text the finding was detected (when available) |
+| `severity` | string | `"high"`, `"medium"`, or `"low"` |
+| `description` | string | Human-readable explanation of the finding |
+
+## Error responses
+
+| Status | Cause |
+|--------|-------|
+| 400 | Invalid JSON body, missing `text` field, or text exceeds 500 KB |
+| 402 | Missing or invalid `X-PAYMENT` header, or insufficient funds |
+| 409 | Duplicate payment nonce (request already in progress or completed) |
+| 500 | Internal Server Error | Scan engine failure |
+| 503 | Payment settlement failed -- retry with the same payment |
+
+See [Errors](/api/errors) for response body details.

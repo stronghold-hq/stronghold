@@ -10,7 +10,7 @@ import { Menu, X, Github } from 'lucide-react'
 const navLinks = [
   { label: 'Features', href: '#features' },
   { label: 'Pricing', href: '#pricing' },
-  { label: 'Docs', href: 'https://api.getstronghold.xyz/docs', external: true },
+  { label: 'Docs', href: 'https://docs.getstronghold.xyz', external: true },
   { label: 'Dashboard', href: '/dashboard', external: true },
 ]
 

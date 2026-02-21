@@ -1,11 +1,11 @@
-# Citadel API - Caddy Reverse Proxy Configuration
-# Replace api.citadel.security with your actual domain
+# Stronghold API - Caddy Reverse Proxy Configuration
+# Replace api.stronghold.security with your actual domain
 
 api.stronghold.security {
     # Enable compression
     encode gzip zstd
 
-    # Allowed CORS origins
+    # Self-hosters: Update the CORS origins below to match your domain
     @cors_origins {
         header Origin https://stronghold-bhj.pages.dev
         header Origin https://getstronghold.xyz
@@ -42,7 +42,7 @@ api.stronghold.security {
     # See deployment docs for rate limiting setup
 
     # Reverse proxy to citadel-api
-    reverse_proxy localhost:8080 {
+    reverse_proxy citadel-api:8080 {
         # Health checks
         health_uri /health
         health_interval 30s

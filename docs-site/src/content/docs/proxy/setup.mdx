@@ -1,0 +1,76 @@
+---
+title: "Setup & Init"
+description: "Initialize Stronghold with interactive or non-interactive setup."
+---
+
+The `stronghold init` command handles everything needed to get Stronghold running: account creation, wallet setup, proxy configuration, and service installation.
+
+## Interactive Setup
+
+```bash
+sudo stronghold init
+```
+
+This walks you through each step interactively:
+
+1. **System compatibility check** -- verifies OS, firewall backend, and keyring
+2. **Account creation or login** -- create a new account or log in with an existing account number
+3. **Wallet setup** -- generate new wallets or import existing keys
+4. **Proxy configuration** -- configure the transparent proxy and install the CA certificate
+5. **Service installation** -- install and enable the system service
+6. **Start proxy** -- begin intercepting and scanning traffic
+
+In interactive mode, press Enter at any prompt to accept the default (auto-generate new wallets, use default configuration).
+
+## Non-Interactive Setup
+
+For automated deployments or scripting, use the `--yes` flag to accept all defaults without prompts:
+
+```bash
+sudo stronghold init --yes
+```
+
+To skip proxy and service installation (account and wallet setup only), add `--skip-service`. This does not require sudo:
+
+```bash
+stronghold init --yes --skip-service
+```
+
+## Importing Existing Wallets
+
+You can import existing wallet keys during init. These flags require `--yes` (non-interactive mode):
+
+```bash
+# Import an EVM wallet
+sudo stronghold init --yes --private-key 0x<hex>
+
+# Import a Solana wallet
+sudo stronghold init --yes --solana-private-key <base58>
+
+# Login to an existing account
+sudo stronghold init --yes --account-number XXXX-XXXX-XXXX-XXXX
+```
+
+You can combine flags. For example, to log in to an existing account and import both wallet types:
+
+```bash
+sudo stronghold init --yes \
+  --account-number XXXX-XXXX-XXXX-XXXX \
+  --private-key 0x<hex> \
+  --solana-private-key <base58>
+```
+
+### Key Format Reference
+
+| Wallet Type | Format | Length | Example Prefix |
+|-------------|--------|--------|----------------|
+| EVM (Base) | Hex string | 64 hex characters without `0x` prefix (66 with prefix) | `0x` (optional) |
+| Solana | Base58 string | ~87-88 characters | varies |
+
+EVM and Solana use completely different cryptographic key types (secp256k1 vs Ed25519). They are not interchangeable.
+
+## Important Warning
+
+`stronghold init` sets up a **system-wide transparent proxy** that intercepts ALL HTTP and HTTPS traffic on the machine. This is by design -- it ensures no traffic bypasses scanning.
+
+This is intended for **isolated machines** running AI agents, not for general-purpose workstations. On a shared or personal machine, all browser traffic, package manager downloads, and other HTTP activity will also be routed through the proxy.
