@@ -208,7 +208,14 @@ func (m *X402Middleware) AtomicPayment(price usdc.MicroUSDC) fiber.Handler {
 
 		// Transition to settling and attempt settlement
 		if err := m.db.TransitionStatus(c.Context(), paymentTx.ID, db.PaymentStatusExecuting, db.PaymentStatusSettling); err != nil {
-			slog.Error("failed to transition payment to settling", "error", err)
+			slog.Error("failed to transition payment to settling", "payment_id", paymentTx.ID, "error", err)
+			// Abort: do not settle if DB state is inconsistent
+			c.Response().ResetBody()
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error":   "Payment processing error",
+				"retry":   true,
+				"message": "Please retry with the same payment. Your payment was not charged.",
+			})
 		}
 
 		// Settle payment (blocking)
