@@ -51,6 +51,12 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 	if h.x402 == nil {
 		panic("scan handler requires x402 middleware")
 	}
+	if h.pricing == nil {
+		panic("scan handler requires pricing config")
+	}
+	if h.scanner == nil {
+		panic("scan handler requires scanner")
+	}
 
 	group := app.Group("/v1/scan")
 
