@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -130,11 +131,36 @@ func (db *DB) Exec(ctx context.Context, sql string, args ...interface{}) error {
 	return err
 }
 
-// QueryRow executes a query that returns a single row
-func (db *DB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+// ExecResult executes a query and returns the command tag (for RowsAffected checks)
+func (db *DB) ExecResult(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
-	return db.pool.QueryRow(ctx, sql, args...)
+	return db.pool.Exec(ctx, sql, args...)
+}
+
+// cancelRow wraps pgx.Row to cancel the timeout context when Scan is called.
+// This is necessary because pgx defers reading the response to Scan time;
+// cancelling the context before Scan (via defer) would cause spurious failures.
+//
+// IMPORTANT: Callers MUST call Scan on the returned Row. If the Row is
+// discarded without Scan, the timeout context will leak.
+type cancelRow struct {
+	row    pgx.Row
+	cancel context.CancelFunc
+}
+
+// Scan reads the row result and then cancels the timeout context.
+func (r *cancelRow) Scan(dest ...any) error {
+	err := r.row.Scan(dest...)
+	r.cancel()
+	return err
+}
+
+// QueryRow executes a query that returns a single row.
+// The returned Row holds the timeout context alive until Scan is called.
+func (db *DB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
+	return &cancelRow{row: db.pool.QueryRow(ctx, sql, args...), cancel: cancel}
 }
 
 // cancelRows wraps pgx.Rows to call a context cancel function when Close is called.
