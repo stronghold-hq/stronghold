@@ -1052,3 +1052,81 @@ func TestAtomicPayment_ExpiredNonceRetry(t *testing.T) {
 	assert.Contains(t, body["error"], "expired")
 }
 
+func TestAtomicPayment_SettlingTransitionFailure(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	testWallet, err := wallet.NewTestWallet()
+	require.NoError(t, err)
+
+	receiverAddress := "0x1234567890123456789012345678901234567890"
+
+	cfg := &config.X402Config{
+		EVMWalletAddress: receiverAddress,
+		FacilitatorURL:   "https://x402.org/facilitator",
+		Networks:         []string{"base-sepolia"},
+	}
+	pricing := &config.PricingConfig{
+		ScanContent: usdc.MicroUSDC(1000),
+	}
+
+	database := db.NewFromPool(testDB.Pool)
+	m := NewX402MiddlewareWithDB(cfg, pricing, database)
+
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	// Mock verify to succeed
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/verify",
+		httpmock.NewJsonResponderOrPanic(200, map[string]interface{}{
+			"isValid": true,
+		}))
+
+	// Settlement should NOT be called since the settling transition fails
+	settleCalled := false
+	httpmock.RegisterResponder("POST", "https://x402.org/facilitator/settle",
+		func(req *http.Request) (*http.Response, error) {
+			settleCalled = true
+			return httpmock.NewJsonResponse(200, map[string]interface{}{
+				"success": true, "transaction": "test-payment-123",
+			})
+		})
+
+	paymentHeader, err := testWallet.CreateTestPaymentHeader(receiverAddress, "1000", "base-sepolia")
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Post("/v1/scan/content", m.AtomicPayment(usdc.MicroUSDC(1000)), func(c fiber.Ctx) error {
+		// Inside the handler, the payment is in "executing" state.
+		// Transition it away from "executing" so that the middleware's
+		// subsequent executing->settling transition will fail.
+		tx := GetPaymentTransaction(c)
+		require.NotNil(t, tx)
+		err := database.TransitionStatus(c.Context(), tx.ID, db.PaymentStatusExecuting, db.PaymentStatusExpired)
+		require.NoError(t, err)
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
+	req := httptest.NewRequest("POST", "/v1/scan/content", bytes.NewBufferString(`{"text":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Payment", paymentHeader)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Should return 503 since the settling transition failed
+	assert.Equal(t, 503, resp.StatusCode)
+
+	var body map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Payment processing error", body["error"])
+	assert.Equal(t, true, body["retry"])
+	assert.Contains(t, body["message"], "Your payment was not charged")
+
+	// Settlement should NOT have been called
+	assert.False(t, settleCalled, "Settlement should not be called when settling transition fails")
+}
+
