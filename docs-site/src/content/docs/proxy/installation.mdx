@@ -1,0 +1,66 @@
+---
+title: "Installation"
+description: "How to install the Stronghold CLI and proxy binary."
+---
+
+## One-Line Installer
+
+The fastest way to install Stronghold is with the install script. This downloads pre-built binaries for your platform and places them in `/usr/local/bin/`:
+
+```bash
+curl -fsSL https://getstronghold.xyz/install.sh | sh
+```
+
+The script detects your OS and architecture automatically (Linux and macOS, amd64 and arm64).
+
+## Build from Source
+
+If you prefer to build from source, clone the repository and compile with Go:
+
+```bash
+git clone https://github.com/yv-was-taken/stronghold.git
+cd stronghold
+go build -o stronghold ./cmd/cli
+go build -o stronghold-proxy ./cmd/proxy
+sudo mv stronghold stronghold-proxy /usr/local/bin/
+```
+
+This produces two binaries:
+
+| Binary | Purpose |
+|--------|---------|
+| `stronghold` | CLI client for setup, management, and wallet operations |
+| `stronghold-proxy` | Transparent proxy daemon that intercepts and scans traffic |
+
+## System Requirements
+
+- **Operating system**: Linux or macOS
+- **Privileges**: Root/sudo access is required for `install`, `enable`, and `disable` commands (these modify firewall rules and system services)
+- **Firewall**: iptables or nftables on Linux, pf on macOS
+- **Keyring** (Linux only): One of gnome-keyring, KWallet, or pass must be available for secure wallet storage
+
+## Verify Your Environment
+
+After installation, run the built-in diagnostic tool to confirm everything is set up correctly:
+
+```bash
+stronghold doctor
+```
+
+This checks for:
+
+- Operating system compatibility
+- Root/admin privileges
+- Firewall tools (iptables/nftables on Linux, pf on macOS)
+- Port availability
+- Configuration file
+- Proxy binary
+- CLI binary
+- Kernel modules (Linux)
+- NFTables backend (Linux)
+
+Fix any issues `doctor` reports before proceeding.
+
+## Next Step
+
+Once installation is verified, run `sudo stronghold init` to create your account, set up your wallet, and configure the proxy. See [Setup & Init](/proxy/setup) for details.

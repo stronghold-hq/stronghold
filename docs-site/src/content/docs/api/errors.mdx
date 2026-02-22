@@ -1,0 +1,141 @@
+---
+title: Errors
+description: Common API error responses and how to handle them.
+---
+
+## Error format
+
+All error responses return JSON with an `error` field:
+
+```json
+{"error": "description of what went wrong"}
+```
+
+Most error responses also include a `request_id` field for tracing and support.
+
+## HTTP status codes
+
+| Status | Meaning | When |
+|--------|---------|------|
+| 400 | Bad Request | Invalid JSON, missing required fields, text too large |
+| 402 | Payment Required | No `X-PAYMENT` header or insufficient funds |
+| 409 | Conflict | Duplicate payment nonce (request already in progress or completed) |
+| 500 | Internal Server Error | Scan engine failure or payment processing error |
+| 502 | Bad Gateway | Upstream service unreachable. Only returned by the transparent proxy, not the API server directly. |
+| 503 | Service Unavailable | Payment settlement failed, or database/facilitator down (readiness check) |
+
+## 400 Bad Request
+
+Returned when the request body is malformed or violates constraints.
+
+```json
+{"error": "Invalid request body", "request_id": "..."}
+```
+
+```json
+{"error": "Text is required", "request_id": "..."}
+```
+
+```json
+{"error": "Text too large, maximum size is 500KB", "request_id": "..."}
+```
+
+## 402 Payment Required
+
+Returned when the `X-PAYMENT` header is missing, invalid, or the payment amount is
+insufficient. The response body includes the payment requirements so clients can
+construct a valid payment and retry.
+
+```json
+{
+  "error": "Payment required",
+  "payment_requirements": {
+    "scheme": "x402",
+    "network": "base",
+    "recipient": "0x...",
+    "amount": "1000",
+    "currency": "USDC",
+    "facilitator_url": "...",
+    "description": "Citadel security scan"
+  },
+  "accepts": [
+    {
+      "scheme": "x402",
+      "network": "base",
+      "recipient": "0x...",
+      "amount": "1000",
+      "currency": "USDC",
+      "facilitator_url": "...",
+      "description": "Citadel security scan"
+    },
+    {
+      "scheme": "x402",
+      "network": "solana",
+      "recipient": "So1ana...",
+      "amount": "1000",
+      "currency": "USDC",
+      "facilitator_url": "...",
+      "description": "Citadel security scan",
+      "fee_payer": "FeePayerPubkey..."
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `payment_requirements` | object | Primary payment option (first entry from `accepts`). Provided for backward compatibility. |
+| `accepts` | array | All supported payment options, one per configured network. |
+| `accepts[].scheme` | string | Payment scheme (always `"x402"`) |
+| `accepts[].network` | string | Blockchain network (e.g. `"base"`, `"solana"`) |
+| `accepts[].recipient` | string | Wallet address to pay |
+| `accepts[].amount` | string | Required amount in microUSDC (string-encoded integer). Both EVM and Solana use 6-decimal USDC, so the value is identical across chains. |
+| `accepts[].currency` | string | Currency (`"USDC"`) |
+| `accepts[].facilitator_url` | string | URL of the x402 facilitator that settles the payment |
+| `accepts[].description` | string | Human-readable description of what the payment is for |
+| `accepts[].fee_payer` | string | Solana fee payer public key. Only present for Solana network options. |
+| `error` | string | Error message, always `"Payment required"` |
+
+Well-behaved clients should handle 402 responses by creating an x402 payment header and
+retrying the request. The [x402-fetch](https://github.com/coinbase/x402) library does
+this automatically.
+
+## 409 Conflict
+
+Returned when the payment nonce has already been used. This happens when a duplicate
+request arrives while the original is still being processed, or after it has completed.
+
+```json
+{"error": "Payment already in progress", "status": "executing"}
+```
+
+```json
+{"error": "Payment nonce expired, please generate a new payment"}
+```
+
+If the original request completed successfully, the cached result is returned with a
+`200` status instead.
+
+## 503 Service Unavailable
+
+Returned when payment settlement fails after the scan has been executed. The payment
+was **not** charged. Clients should retry with the same payment header.
+
+```json
+{
+  "error": "Payment settlement failed",
+  "retry": true,
+  "message": "Please retry with the same payment. Your payment was not charged."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error` | string | Error description |
+| `retry` | boolean | Always `true` -- indicates the request is safe to retry |
+| `message` | string | Human-readable retry guidance |
+
+## Request IDs
+
+Most error responses include a `request_id` field. Include this value when contacting
+support to help trace the request through server logs.

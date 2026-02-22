@@ -1,0 +1,116 @@
+---
+title: "Core Concepts"
+description: "Key terms and concepts used throughout the Stronghold documentation."
+---
+
+This page defines the key terms and concepts referenced throughout the Stronghold documentation.
+
+## Decision
+
+Every scan returns a **decision** — the final verdict on whether the scanned content is safe.
+
+| Decision | Meaning |
+|----------|---------|
+| `ALLOW` | No threats detected. Content is safe to process. |
+| `WARN` | Elevated risk detected but confidence is not high enough to block. Content is passed through with warning metadata. |
+| `BLOCK` | High-confidence threat detected. Content should not be processed. The transparent proxy withholds blocked content from the agent entirely. |
+
+## Scores
+
+Each scanning layer produces a **score** between 0 and 1, where higher values indicate greater threat confidence. The score keys differ between content scanning and output scanning.
+
+### Content scan scores (`/v1/scan/content`)
+
+| Score | Layer | Description |
+|-------|-------|-------------|
+| `combined` | All layers | Weighted combination of all detection layers. This is the primary score used for the final decision. |
+| `heuristic` | Heuristic | Pattern-matching score based on known injection signatures. |
+| `semantic` | Semantic Similarity | Cosine similarity to known attack embeddings. |
+| `ml_confidence` | ML/LLM Classification | Confidence from the LLM analysis layer. 0.0 when the LLM layer is disabled. |
+
+> The `combined` key is only present when the hybrid detector is active (semantic or LLM layers enabled). In heuristic-only mode, the primary score is `heuristic`.
+
+### Output scan scores (`/v1/scan/output`)
+
+| Score | Layer | Description |
+|-------|-------|-------------|
+| `credential_score` | Credential Detection | Confidence that the output contains leaked credentials or secrets (0 to 1). |
+| `findings_count` | Credential Detection | Number of distinct credential/secret patterns found in the output. |
+
+The API response includes all individual scores alongside the decision, so you can inspect which layers contributed to the verdict.
+
+## Scanning Layers
+
+Stronghold uses a **4-layer scanning pipeline**. Each layer adds detection capability at the cost of additional latency:
+
+| Layer | Method | Typical Latency | Description |
+|-------|--------|-----------------|-------------|
+| **Heuristic** | Pattern matching | &lt;1ms | Regex and signature-based detection of known injection patterns. Fastest layer, catches obvious attacks. |
+| **ML Classification** | Citadel/Hugot | ~5ms | Neural network trained on prompt injection datasets. Catches attacks that evade simple patterns. |
+| **Semantic Similarity** | Embedding comparison | ~10ms | Computes embeddings and measures cosine similarity against a database of known attack vectors. Catches novel phrasings of known attack types. |
+| **LLM Analysis** (optional) | OpenRouter LLM reasoning | ~500ms | Any OpenRouter-compatible LLM reasons about whether the content is an attack. Most capable but slowest. Disabled by default. |
+
+Layers run in order. If an early layer produces a high-confidence `BLOCK`, later layers may be skipped for performance.
+
+## Threat Categories
+
+Stronghold classifies detected threats into the following categories:
+
+| Category | Description |
+|----------|-------------|
+| `instruction_override` | Attempts to replace or override the agent's system prompt or instructions. |
+| `system_extraction` | Attempts to extract the agent's system prompt, internal instructions, or configuration. |
+| `context_manipulation` | Attempts to alter the agent's understanding of its context, conversation history, or role. |
+| `jailbreak` | Attempts to remove safety constraints or behavioral guardrails from the agent. |
+| `roleplay_attack` | Uses fictional scenarios or role assignment to bypass the agent's restrictions. |
+| `data_exfil` | Attempts to exfiltrate data by encoding it in URLs, requests, or other output channels. |
+| `credential_leak` | Agent response contains API keys, passwords, tokens, or other secrets. |
+| `obfuscation` | Uses encoding, Unicode tricks, or other techniques to disguise an attack payload. |
+| `multiturn_attack` | A coordinated attack spread across multiple turns of conversation to gradually shift agent behavior. |
+
+The `reason` field in scan responses references these categories when a threat is detected.
+
+## x402
+
+**x402** is an HTTP-native payment protocol. Instead of requiring API keys or subscriptions, Stronghold uses x402 for per-request payment:
+
+1. The client sends a request to a paid endpoint.
+2. The server responds with **402 Payment Required** and a JSON body specifying the price, token, network, and recipient address.
+3. The client signs an EIP-712 `TransferWithAuthorization` message (for EVM networks) or an equivalent authorization (for Solana), authorizing the exact payment amount.
+4. The client retries the original request with the signed payment in the `X-PAYMENT` header.
+5. The server verifies the authorization and processes the request.
+
+Client libraries like [`x402-fetch`](https://www.npmjs.com/package/x402-fetch) handle this flow automatically. See [x402 Protocol](/billing/x402) for the full specification.
+
+## microUSDC
+
+All money amounts in Stronghold are represented as **microUSDC** — string-encoded integers where 1 microUSDC equals 0.000001 USDC.
+
+| microUSDC value | USDC equivalent | USD equivalent |
+|-----------------|-----------------|----------------|
+| `"1"` | 0.000001 USDC | $0.000001 |
+| `"1000"` | 0.001 USDC | $0.001 |
+| `"1000000"` | 1.0 USDC | $1.00 |
+
+microUSDC values are always transmitted as **strings**, not numbers, to avoid floating-point precision issues. This is the canonical format for all money fields in the API, CLI output, and configuration.
+
+## Content Scanning vs. Output Scanning
+
+Stronghold provides two distinct scan types for bidirectional protection:
+
+**Content Scanning** (`/v1/scan/content`) scans **incoming** content for prompt injection attacks. This is what the transparent proxy does automatically — it scans every HTTP response before the agent reads it.
+
+**Output Scanning** (`/v1/scan/output`) scans **outgoing** agent responses for credential leaks — API keys, passwords, tokens, connection strings, and other secrets that the agent might inadvertently include in its output.
+
+## Transparent Proxy
+
+The transparent proxy is a network-level interceptor that sits between the agent and the internet. It uses operating system firewall rules (iptables/nftables on Linux, pf on macOS) to redirect all HTTP/HTTPS traffic from the agent's dedicated system user through the Stronghold scanning pipeline.
+
+Key properties:
+- Operates **outside** the agent's cognition — cannot be bypassed by prompt injection
+- Scans content **before** the agent receives it
+- Requires no code changes to the agent
+- Works with any agent framework or language
+- Adds `X-Stronghold-*` response headers with scan metadata
+
+See [Why Network-Level Scanning](/getting-started/why-network-level) for the motivation behind this approach and [Proxy Architecture](/proxy/architecture) for implementation details.

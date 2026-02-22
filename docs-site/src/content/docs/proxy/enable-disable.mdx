@@ -1,0 +1,59 @@
+---
+title: "Enable & Disable"
+description: "Start and stop the transparent proxy protection."
+---
+
+After initial setup with `stronghold init`, use `enable` and `disable` to control the proxy without re-running the full setup process.
+
+## Enable
+
+```bash
+sudo stronghold enable
+```
+
+This does two things:
+
+1. **Starts the proxy daemon** -- launches the `stronghold-proxy` process on localhost:8402
+2. **Configures firewall rules** -- sets up iptables/nftables (Linux) or pf (macOS) to route all HTTP and HTTPS traffic through the proxy
+
+Once enabled, all network traffic on the machine is intercepted and scanned. No application configuration is needed -- the proxy operates at the kernel level.
+
+## Disable
+
+```bash
+sudo stronghold disable
+```
+
+This reverses the enable step:
+
+1. **Removes firewall rules** -- restores direct internet access by removing the iptables/nftables/pf rules
+2. **Stops the proxy daemon** -- terminates the `stronghold-proxy` process
+
+Traffic immediately returns to normal after disable.
+
+## Root Required
+
+Both `enable` and `disable` require root/sudo because they modify kernel-level firewall rules. Running without sudo will fail with a permission error.
+
+## Check Status
+
+To check whether the proxy is currently active without needing root:
+
+```bash
+stronghold status
+```
+
+This reports:
+
+- Whether the proxy daemon is running
+- Whether firewall rules are active
+- Current proxy configuration
+
+## Why Transparent Interception
+
+The transparent proxy operates at the kernel level using firewall rules, not the `HTTP_PROXY` or `HTTPS_PROXY` environment variables. This is a critical distinction:
+
+- **Environment variable proxies** can be bypassed by any application that ignores them, or by an agent that has been prompt-injected into unsetting them.
+- **Kernel-level interception** cannot be bypassed by applications. All TCP traffic matching the firewall rules is redirected regardless of what the application does.
+
+This makes the proxy tamper-resistant -- even a compromised agent cannot disable or circumvent the scanning.

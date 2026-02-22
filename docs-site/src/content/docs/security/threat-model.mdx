@@ -1,0 +1,62 @@
+---
+title: "Threat Model"
+description: "What Stronghold protects against and its explicit limitations."
+---
+
+Stronghold protects AI agents at the network level by scanning both **incoming content** (what the agent reads) and **outgoing responses** (what the agent produces). This page describes the specific threats it detects and the boundaries of that protection.
+
+## Incoming Threats (Content Scanning)
+
+The `/v1/scan/content` endpoint and the transparent proxy detect the following attack categories in content that an agent is about to consume:
+
+- **Prompt injection** — instructions embedded in web pages, emails, or API responses designed to hijack the agent's behavior (e.g., "ignore previous instructions and...")
+- **DAN jailbreaks** — "Do Anything Now" and similar jailbreak patterns that attempt to remove the agent's safety constraints
+- **System prompt extraction** — attacks that trick the agent into revealing its system prompt or internal instructions
+- **Instruction override / context manipulation** — attempts to redefine the agent's role, goals, or context window
+- **Roleplay attacks** — "act as", "pretend to be", "you are now" patterns that shift the agent into an unsafe persona
+- **Data exfiltration via markdown image injection** — hidden markdown images with URLs that encode sensitive data, causing the agent to leak information when rendering
+- **Obfuscated attacks** — encoded, Base64, ROT13, Unicode tricks, or other obfuscation techniques hiding malicious instructions
+- **Multi-turn attack sequences** — coordinated attacks spread across multiple messages or interactions
+
+## Outgoing Threats (Output Scanning)
+
+The `/v1/scan/output` endpoint detects credentials and secrets that an agent might inadvertently include in its responses:
+
+- API keys and tokens
+- Passwords and secrets
+- Database connection strings
+- Private keys (SSH, PGP, crypto wallet keys)
+- AWS/cloud credentials (access keys, secret keys, session tokens)
+- Environment variable dumps
+
+## Threat Categories
+
+Each detection is classified into one of the following categories:
+
+| Category | Direction | Description |
+|----------|-----------|-------------|
+| `instruction_override` | Incoming | Attempts to override the agent's instructions |
+| `system_extraction` | Incoming | Attempts to extract the system prompt |
+| `context_manipulation` | Incoming | Attempts to manipulate the agent's context |
+| `jailbreak` | Incoming | DAN and similar jailbreak patterns |
+| `roleplay_attack` | Incoming | Persona-shifting attacks |
+| `data_exfil` | Incoming | Data exfiltration via image injection or similar |
+| `obfuscation` | Incoming | Encoded or obfuscated attack payloads |
+| `multiturn_attack` | Incoming | Multi-turn coordinated attacks |
+| `credential_leak` | Outgoing | Secrets, keys, or credentials in output |
+
+## Explicit Limitations
+
+Stronghold is not a silver bullet. The following limitations are important to understand:
+
+- **Novel zero-day techniques** — Stronghold cannot detect prompt injection techniques that are not represented in its training data or heuristic rules. New attack methods may evade detection until the models are updated.
+- **Binary content** — Images, PDFs, audio, video, and other binary formats are not scanned. Only text-based content is analyzed.
+- **Content size limit** — The API rejects content larger than 500KB with an error. The transparent proxy uses a 1MB threshold and silently passes oversized content through without scanning.
+- **Network-level protection only** — The transparent proxy protects network traffic. It does not protect against attacks delivered via local files, in-process memory, or other non-network channels.
+- **API endpoint timing** — The `/v1/scan/content` API endpoint does **not** provide the same protection level as the proxy. When calling the API directly, the agent has already read the content before the scan happens. The proxy intercepts content *before* it reaches the agent.
+
+:::tip[For agent developers]
+When a threat is detected, the response includes a `sanitized_text` field containing a cleaned version of the content with threats removed or redacted. Agents can use this field to safely process content that was flagged as `WARN` without re-fetching and re-scanning.
+
+Note: `sanitized_text` is only actively sanitized when the hybrid detector is running (semantic/LLM layers enabled). In heuristic-only mode, this field contains the original text unchanged. Do not rely on it for safe processing unless the hybrid detector is active. Output scans (`/v1/scan/output`) do not populate this field.
+:::

@@ -1,0 +1,30 @@
+---
+title: "enable / disable"
+description: "Start and stop the Stronghold transparent proxy."
+---
+
+After initial setup with `stronghold init`, use `enable` and `disable` to control the proxy without re-running the full setup process.
+
+## enable
+
+```bash
+sudo stronghold enable
+```
+
+Starts the proxy daemon and configures kernel-level firewall rules (iptables/nftables on Linux, pf on macOS) to intercept all HTTP and HTTPS traffic. Once enabled, every outbound request on the machine passes through Stronghold for scanning.
+
+## disable
+
+```bash
+sudo stronghold disable
+```
+
+Removes the firewall rules and stops the proxy daemon. Traffic immediately returns to direct internet access with no interception.
+
+## Root Required
+
+Both commands require root/sudo because they modify kernel-level firewall rules. Running without sudo will fail with a permission error.
+
+## Transparent Interception
+
+The proxy operates at the kernel level using firewall rules, not the `HTTP_PROXY` or `HTTPS_PROXY` environment variables. This means it cannot be bypassed by applications -- even a compromised agent cannot disable or circumvent the scanning by unsetting environment variables.

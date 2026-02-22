@@ -1,0 +1,108 @@
+---
+title: "Response Headers"
+description: "HTTP headers added by the proxy to every response for agentic integration."
+---
+
+The Stronghold proxy adds headers to **every** proxied HTTP response, regardless of whether the content was flagged. This allows AI agents and monitoring tools to programmatically inspect scan results without parsing response bodies.
+
+## Header Reference
+
+| Header | Description | Values |
+|--------|-------------|--------|
+| `X-Stronghold-Decision` | What the scanner found | `ALLOW`, `WARN`, `BLOCK` |
+| `X-Stronghold-Action` | What the proxy did | `allow`, `warn`, `block` |
+| `X-Stronghold-Reason` | Why content was flagged | Human-readable string |
+| `X-Stronghold-Score` | Combined threat score. Present when a scan produced a `combined` or `heuristic` score. Omitted when no score was computed. | `0.00` - `1.00` |
+| `X-Stronghold-Scan-Type` | Type of scan performed | `content`, `disabled`, `skipped-unscannable`, `skipped-not-scannable`, `skipped-oversized` |
+| `X-Stronghold-Warning` | Warning message | Only present if action is `warn` |
+| `X-Stronghold-Request-ID` | UUID for tracing | `req-<hex>` |
+| `X-Stronghold-Scan-Latency` | Time spent scanning | e.g. `12ms` |
+
+## Decision vs Action
+
+The `Decision` and `Action` headers can have different values. This is intentional and reflects the separation between detection and enforcement:
+
+- **Decision** = what the scanner found. This is the raw detection result. `BLOCK` means the scanner identified a high threat score.
+- **Action** = what the proxy did about it. This is controlled by your [configuration](/proxy/configuration). The proxy may be configured to allow content that the scanner would otherwise block.
+
+### Example: Flagged but Allowed
+
+A response with these headers:
+
+```
+X-Stronghold-Decision: BLOCK
+X-Stronghold-Action: allow
+X-Stronghold-Score: 0.87
+X-Stronghold-Reason: Prompt injection detected: instruction override attempt
+```
+
+This means the scanner detected a prompt injection (decision = `BLOCK`, score = 0.87), but the proxy configuration has `action_on_block` set to `allow`, so the content was passed through with headers attached. The agent can read these headers and decide how to handle the flagged content.
+
+### Example: Clean Content
+
+```
+X-Stronghold-Decision: ALLOW
+X-Stronghold-Action: allow
+X-Stronghold-Score: 0.02
+X-Stronghold-Scan-Type: content
+```
+
+Low score, no threat detected. Content passed through normally.
+
+## Parsing Headers in Code
+
+### Python
+
+```python
+import requests
+
+response = requests.get("http://example.com")
+
+decision = response.headers.get("X-Stronghold-Decision")
+if decision == "BLOCK":
+    reason = response.headers.get("X-Stronghold-Reason")
+    print(f"Content flagged: {reason}")
+```
+
+### JavaScript
+
+```javascript
+const response = await fetch("http://example.com");
+
+const decision = response.headers.get("X-Stronghold-Decision");
+const action = response.headers.get("X-Stronghold-Action");
+
+if (decision === "BLOCK" && action === "allow") {
+  console.log("Flagged but allowed:", response.headers.get("X-Stronghold-Reason"));
+}
+```
+
+## Scan Type Values
+
+The `X-Stronghold-Scan-Type` header indicates what kind of scan was performed:
+
+| Value | Meaning |
+|-------|---------|
+| `content` | Full content scan was performed (prompt injection detection) |
+| `disabled` | Scanning is disabled in configuration |
+| `skipped-unscannable` | Content type is not text-based (binary data) |
+| `skipped-not-scannable` | Content was fetched but determined to be unscannable after inspection |
+| `skipped-oversized` | Content exceeds the 1 MB size limit |
+
+When the scan type is `skipped-unscannable`, `skipped-not-scannable`, or `skipped-oversized`, the decision will be `ALLOW` and the `X-Stronghold-Score` header is omitted (not present) since no scan was actually performed.
+
+## HTTPS (MITM) Header Differences
+
+When the proxy intercepts HTTPS traffic via MITM, the response headers are a reduced subset of the full set listed above. Present on MITM responses **when a scan was performed**. For unscannable or oversized content, only `X-Stronghold-Proxy: mitm` is set.
+
+| Header | Description |
+|--------|-------------|
+| `X-Stronghold-Proxy` | Always set to `mitm` to indicate the response was intercepted via MITM |
+| `X-Stronghold-Decision` | The scan decision (`ALLOW`, `WARN`, `BLOCK`) — only present when a scan was performed |
+| `X-Stronghold-Reason` | Why content was flagged (only present when scanned content is flagged) |
+
+:::note
+In the current implementation, blocked MITM responses include `X-Stronghold-Decision` and `X-Stronghold-Reason` but may not include `X-Stronghold-Proxy`.
+:::
+
+Headers such as `X-Stronghold-Action`, `X-Stronghold-Score`, `X-Stronghold-Scan-Type`, `X-Stronghold-Request-ID`, `X-Stronghold-Scan-Latency`, and `X-Stronghold-Warning` are **only present on plain HTTP responses**. If your application relies on these headers for decision-making, be aware that they will not be available for HTTPS traffic.

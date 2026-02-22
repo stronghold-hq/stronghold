@@ -1,0 +1,62 @@
+---
+title: "GET /v1/pricing"
+description: Retrieve endpoint pricing information.
+---
+
+## Endpoint
+
+```
+GET /v1/pricing
+```
+
+**Authentication:** None required.
+
+## Example request
+
+```bash
+curl https://api.getstronghold.xyz/v1/pricing
+```
+
+## Response (200)
+
+```json
+{
+  "currency": "USDC",
+  "network": "base",
+  "networks": ["base", "solana"],
+  "routes": [
+    {
+      "path": "/v1/scan/content",
+      "method": "POST",
+      "price_micro_usdc": "1000",
+      "price_usd": 0.001,
+      "description": "Content scanning for prompt injection detection"
+    },
+    {
+      "path": "/v1/scan/output",
+      "method": "POST",
+      "price_micro_usdc": "1000",
+      "price_usd": 0.001,
+      "description": "Output scanning for credential leak detection"
+    }
+  ]
+}
+```
+
+## Response fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `currency` | string | Payment currency (`"USDC"`) |
+| `network` | string | Default payment network |
+| `networks` | string[] | All supported payment networks |
+| `routes` | array | List of priced endpoints |
+| `routes[].path` | string | Endpoint path |
+| `routes[].method` | string | HTTP method |
+| `routes[].price_micro_usdc` | string | Canonical price as a string-encoded microUSDC integer |
+| `routes[].price_usd` | number | Convenience price in USD (float) |
+| `routes[].description` | string | Human-readable endpoint description |
+
+`price_micro_usdc` is the **canonical** value. It is a string-encoded integer where
+`"1000"` equals 1000 microUSDC ($0.001). `price_usd` is a convenience float and should
+not be used for payment calculations.

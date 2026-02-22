@@ -1,0 +1,77 @@
+---
+title: "Pricing"
+description: "Stronghold pricing model — pay-per-request with no subscriptions."
+---
+
+Stronghold uses a simple **pay-per-request** model. There are no subscriptions, no tiers, and no API keys. You pay for what you use, and every request costs the same.
+
+## Per-Request Cost
+
+Both scanning endpoints cost **$0.001 per request** (1000 microUSDC):
+
+| Endpoint | Cost | microUSDC |
+|----------|------|-----------|
+| `/v1/scan/content` | $0.001 | 1000 |
+| `/v1/scan/output` | $0.001 | 1000 |
+
+Payment is made via the [x402 protocol](/billing/x402/) using USDC on **Base** (EVM) or **Solana**. No minimum balance is required.
+
+## Money Format
+
+All canonical money fields in API responses are **string-encoded microUSDC integers**. One microUSDC equals 0.000001 USDC.
+
+| microUSDC value | USDC equivalent |
+|-----------------|-----------------|
+| `"1000"` | $0.001 |
+| `"100000"` | $0.10 |
+| `"1000000"` | $1.00 |
+
+Strings are used instead of floats to avoid rounding errors in financial calculations.
+
+## Proxy Costs
+
+The transparent proxy uses the same per-scan pricing. Every HTTP/HTTPS request that passes through the proxy is scanned and paid for automatically from your locally-stored wallet. There is no additional markup for proxy usage.
+
+## Low Balance Warning
+
+The web dashboard displays a warning when your wallet balance drops below **1 USDC**. You can check your balance at any time with the CLI:
+
+```bash
+stronghold account balance
+```
+
+## Check Pricing Programmatically
+
+Query the pricing endpoint directly to get current costs:
+
+```bash
+curl https://api.getstronghold.xyz/v1/pricing
+```
+
+Sample response:
+
+```json
+{
+  "currency": "USDC",
+  "network": "base",
+  "networks": ["base", "solana"],
+  "routes": [
+    {
+      "path": "/v1/scan/content",
+      "method": "POST",
+      "price_micro_usdc": "1000",
+      "price_usd": 0.001,
+      "description": "Content scanning for prompt injection detection"
+    },
+    {
+      "path": "/v1/scan/output",
+      "method": "POST",
+      "price_micro_usdc": "1000",
+      "price_usd": 0.001,
+      "description": "Output scanning for credential leak detection"
+    }
+  ]
+}
+```
+
+The `network` field shows the primary payment network, while `networks` lists all supported chains. Each route includes both the string-encoded integer `price_micro_usdc` and the human-readable `price_usd` equivalent.

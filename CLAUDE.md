@@ -7,13 +7,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **CRITICAL: Do NOT commit or push unless explicitly told to do so.**
 
 - **NEVER commit directly to master.** Always create a feature branch and open a PR targeting master. Only commit to master if the user explicitly says to do so.
-- **ALWAYS run `go test ./...` and verify ALL tests pass before committing.** No exceptions. If Docker is not running, start it first. If tests fail, fix them before committing. Never commit with failing tests.
+- For commits that modify Go code (`*.go`, `go.mod`, `go.sum`), run `go test ./...` and verify all tests pass before committing.
+- For commits that modify frontend TypeScript (`web/**/*.ts`, `web/**/*.tsx`), run `cd web && bun run test` and verify tests pass before committing.
+- Docs-only changes (for example `*.md`) do not require running Go or frontend tests.
 - Make changes and verify they work locally first
 - Wait for explicit user approval before committing
 - Never assume a change is ready to commit just because you made it
 - Always test frontend changes locally with `bun run dev` before considering them complete
 - Do not push multiple speculative commits hoping one works
 - **When writing PR/issue comments**, never redundantly reference the PR or issue the comment is posted on. The reader already knows where they are. Write for the context the comment appears in.
+- NEVER remove an active worktree directory. `git worktree prune` is only for stale metadata. Before deleting any worktree directory, verify it is not listed by `git worktree list` (or is confirmed orphaned/stale).
 
 ## Project Overview
 
@@ -43,6 +46,15 @@ The platform provides 4-layer security scanning: heuristics, ML classification (
 - Use `bun add <pkg>` to add dependencies (NOT `npm install <pkg>`)
 
 If you catch yourself about to type `npm`, `npx`, `yarn`, or `pnpm` — STOP and use `bun` instead.
+
+## No Python
+
+**CRITICAL: Never use Python for anything unless the user explicitly tells you to.**
+
+- Use shell tools (`jq`, `sed`, `awk`, `grep`, etc.) for data processing and scripting tasks
+- Use `jq` for JSON parsing — not Python
+- Use dedicated Claude Code tools (Read, Grep, Glob) instead of writing Python scripts to explore the codebase
+- The only exception is when the user explicitly asks you to use Python
 
 ## Build Commands
 
@@ -195,9 +207,9 @@ Reference implementations:
 
 ## Testing Requirements
 
-**CRITICAL: All tests must actually run and pass before considering work complete.**
+**CRITICAL: Required tests for the modified code must actually run and pass before considering work complete.**
 
-- Tests require Docker to be running (testcontainers spins up PostgreSQL)
+- Go tests require Docker to be running (testcontainers spins up PostgreSQL)
 - If Docker is not available, tests will be SKIPPED - this is NOT the same as passing
 - **Never proceed with a commit if tests are skipped due to missing infrastructure**
 - If you see "Docker is not available, skipping test" - STOP and start Docker first
@@ -308,8 +320,8 @@ fly secrets set STRIPE_WEBHOOK_SECRET=whsec_... -a stronghold-api
 fly secrets set STRIPE_PUBLISHABLE_KEY=pk_live_... -a stronghold-api
 
 # Dashboard CORS
-fly secrets set DASHBOARD_URL=https://stronghold.security -a stronghold-api
-fly secrets set DASHBOARD_ALLOWED_ORIGINS=https://stronghold.security -a stronghold-api
+fly secrets set DASHBOARD_URL=https://getstronghold.xyz -a stronghold-api
+fly secrets set DASHBOARD_ALLOWED_ORIGINS=https://getstronghold.xyz -a stronghold-api
 
 # AWS KMS (wallet key encryption)
 fly secrets set KMS_REGION=us-east-1 -a stronghold-api

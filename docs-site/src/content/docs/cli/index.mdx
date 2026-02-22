@@ -1,0 +1,69 @@
+---
+title: "CLI Overview"
+description: "Complete reference for all Stronghold CLI commands."
+slug: cli
+---
+
+`stronghold` is the command-line interface for managing the transparent proxy, wallet, and account. It handles everything from initial setup to day-to-day proxy control and wallet management.
+
+## Command Reference
+
+| Command | Description | Root Required |
+|---------|-------------|---------------|
+| `stronghold doctor` | Verify system requirements | No |
+| `stronghold init` | Initialize and configure wallet | Yes |
+| `stronghold enable` | Start proxy and enable interception | Yes |
+| `stronghold disable` | Stop proxy and restore direct access | Yes |
+| `stronghold status` | Display proxy status and statistics | No |
+| `stronghold health` | Check API and RPC health | No |
+| `stronghold logs` | View proxy logs | No |
+| `stronghold account balance` | Display current account balance | No |
+| `stronghold account deposit` | Display deposit options | No |
+| `stronghold wallet list` | List configured wallet addresses | No |
+| `stronghold wallet balance` | Display per-chain wallet balances | No |
+| `stronghold wallet export` | Export private keys for backup | No |
+| `stronghold wallet replace <chain>` | Replace wallet by chain | No |
+| `stronghold wallet link` | Register wallets with server | No |
+| `stronghold config get [key]` | Display configuration | No |
+| `stronghold config set <key> <value>` | Update configuration | No |
+| `stronghold uninstall` | Remove Stronghold from system | Yes |
+
+## Commands Without Dedicated Pages
+
+### logs
+
+View proxy logs. By default, shows the last 100 lines.
+
+```bash
+stronghold logs
+stronghold logs --follow
+stronghold logs --lines 50
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--follow, -f` | bool | `false` | Follow log output in real time (like `tail -f`) |
+| `--lines, -n` | int | `100` | Number of lines to show |
+
+### uninstall
+
+Remove Stronghold from the system. Stops the proxy, removes firewall rules, the system service, and binaries. By default, configuration files are preserved.
+
+```bash
+sudo stronghold uninstall
+sudo stronghold uninstall --preserve-config=false
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--preserve-config, -p` | bool | `true` | Preserve configuration files (wallet keys remain in OS keyring regardless) |
+
+## Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--version` | Show version information |
+
+## Prerequisites
+
+Most commands require a configured account. Run `stronghold init` first to set up your account, wallet, and proxy. Use `stronghold doctor` before init to verify that your system meets all requirements.

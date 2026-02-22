@@ -1,0 +1,126 @@
+---
+title: "Configuration"
+description: "Proxy configuration file and environment variables."
+---
+
+## Config File
+
+The proxy configuration is stored at:
+
+```
+~/.stronghold/config.yaml
+```
+
+You can read and modify individual values with the CLI:
+
+```bash
+# Read a config value
+stronghold config get scanning.mode
+
+# Set a config value
+stronghold config set scanning.block_threshold 0.7
+```
+
+## Full Configuration Reference
+
+```yaml
+scanning:
+  mode: smart
+  block_threshold: 0.55
+  fail_open: true
+  content:
+    enabled: true
+    action_on_warn: "warn"    # allow | warn | block
+    action_on_block: "block"  # allow | warn | block
+  output:
+    enabled: true
+    action_on_warn: "warn"
+    action_on_block: "block"
+```
+
+### Field Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `scanning.mode` | string | `smart` | Scanning mode |
+| `scanning.block_threshold` | float | `0.55` | Score threshold for BLOCK decisions (0.0 - 1.0) |
+| `scanning.fail_open` | bool | `true` | If `true`, traffic passes through when the scan API is unreachable. If `false`, traffic is blocked on API failure. |
+| `scanning.content.enabled` | bool | `true` | Enable content scanning (prompt injection detection) |
+| `scanning.content.action_on_warn` | string | `warn` | Action when scanner returns WARN |
+| `scanning.content.action_on_block` | string | `block` | Action when scanner returns BLOCK |
+| `scanning.output.enabled` | bool | `true` | Reserved for future output policy; currently not enforced by proxy runtime |
+| `scanning.output.action_on_warn` | string | `warn` | Reserved for future output policy; currently not enforced by proxy runtime |
+| `scanning.output.action_on_block` | string | `block` | Reserved for future output policy; currently not enforced by proxy runtime |
+
+### Action Options
+
+Each action field accepts one of three values:
+
+| Action | Behavior |
+|--------|----------|
+| `allow` | Pass content through. Scan headers are still attached to the response. |
+| `warn` | Pass content through with an `X-Stronghold-Warning` header added. |
+| `block` | Return a 403 Forbidden response. The original content is not delivered to the application. |
+
+## Example Configurations
+
+### Paranoid Mode
+
+Block everything the scanner flags, including warnings. Fail-closed if the API is unreachable.
+
+```yaml
+scanning:
+  block_threshold: 0.4
+  fail_open: false
+  content:
+    enabled: true
+    action_on_warn: "block"
+    action_on_block: "block"
+```
+
+### Permissive Content
+
+Allow prompt injection attempts through for logging and research.
+
+```yaml
+scanning:
+  content:
+    enabled: true
+    action_on_warn: "allow"
+    action_on_block: "allow"
+```
+
+### Audit Mode
+
+Scan everything but never block. Useful for evaluating detection accuracy before enforcing.
+
+```yaml
+scanning:
+  content:
+    enabled: true
+    action_on_warn: "allow"
+    action_on_block: "allow"
+```
+
+In audit mode, all scan results are still available in the [response headers](/proxy/response-headers). You get full visibility into what the scanner would flag without affecting traffic.
+
+`scanning.output.*` keys are retained in config for forward compatibility but are not currently enforced by proxy runtime policy.
+
+## Security Note
+
+Configuration is **file-only**. There is no HTTP header or API parameter that can override scanning behavior at request time. This is a deliberate security decision: if a prompt injection could add a header like `X-Stronghold-Bypass: true` to disable scanning, the entire protection would be defeated.
+
+All scanning policy changes require modifying the config file on disk, which requires file system access to the machine running the proxy.
+
+## Environment Variables
+
+These environment variables override config file values and are primarily used for deployment and debugging:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STRONGHOLD_PROXY_PORT` | `8402` | Local port the proxy listens on (overrides `proxy.port`) |
+| `STRONGHOLD_PROXY_BIND` | `127.0.0.1` | Address the proxy binds to (overrides `proxy.bind`) |
+| `STRONGHOLD_API_ENDPOINT` | `https://api.getstronghold.xyz` | Stronghold API server URL (overrides `api.endpoint`). Note: The CLI uses `STRONGHOLD_API_URL` for the same purpose. The proxy-specific variable is `STRONGHOLD_API_ENDPOINT`. |
+| `STRONGHOLD_CONFIG` | `~/.stronghold/config.yaml` | Path to the configuration file |
+
+There are no environment variable overrides for `scanning.fail_open` or `logging.level`. Change those values in the config file directly or via `stronghold config set`.

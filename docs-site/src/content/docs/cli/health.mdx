@@ -1,0 +1,32 @@
+---
+title: "health"
+description: "Check API and blockchain RPC health."
+---
+
+`stronghold health` checks the availability of the Stronghold API and the blockchain RPC endpoints used for payments.
+
+## Usage
+
+```bash
+stronghold health
+```
+
+No root required.
+
+## Checks Performed
+
+1. **Stronghold API** -- pings the `/health` endpoint on the API server
+2. **Base RPC** -- checks the Base (EVM) blockchain RPC endpoint
+3. **Solana RPC** -- checks the Solana blockchain RPC endpoint
+
+## RPC Statuses
+
+Each RPC endpoint reports one of the following:
+
+| Status | Meaning |
+|--------|---------|
+| up | Endpoint is healthy and responding normally |
+| congested | Endpoint is responding but with elevated latency |
+| down | Endpoint is unreachable or returning errors |
+
+If any endpoint reports `down`, payments on that chain may fail until the issue is resolved.

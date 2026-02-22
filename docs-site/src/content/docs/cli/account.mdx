@@ -1,0 +1,48 @@
+---
+title: "account"
+description: "Check balance and manage deposits."
+---
+
+The `stronghold account` subcommands display account balance information and deposit options.
+
+## Subcommands
+
+### account balance
+
+```bash
+stronghold account balance
+```
+
+Displays the current USDC balance for all configured wallets (Base and Solana).
+
+Example output:
+
+```
+Wallet Balances
+
+Base (EVM) Wallet:
+  0x1234...5678
+  Balance: 4.500000 USDC
+
+Solana Wallet:
+  ABC123...XYZ
+  Balance: 2.000000 USDC
+```
+
+`account balance` is an alias for `wallet balance`.
+
+### account deposit
+
+```bash
+stronghold account deposit
+```
+
+Displays deposit addresses and available funding options.
+
+## Deposit Methods
+
+There are three ways to fund your account:
+
+1. **Dashboard** (recommended) -- use Stripe through the web dashboard for fiat-to-USDC conversion
+2. **Direct transfer (Base)** -- send USDC on the Base network directly to your EVM wallet address
+3. **Direct transfer (Solana)** -- send USDC on Solana directly to your Solana wallet address

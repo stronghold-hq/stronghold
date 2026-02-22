@@ -1,0 +1,44 @@
+---
+title: "status"
+description: "Check the current proxy status and statistics."
+---
+
+`stronghold status` displays a summary of the proxy state, traffic statistics, and wallet information.
+
+## Usage
+
+```bash
+stronghold status
+```
+
+No root required.
+
+## Output
+
+The status command reports the following sections:
+
+**Proxy**
+- **Status** -- whether the proxy is running or stopped
+- **Port** -- the local port the proxy is listening on
+- **PID** -- process ID of the running proxy
+- **Address** -- bind address of the proxy
+- **Mode** -- current scanning mode
+- **Protection** -- whether firewall interception is enabled or disabled
+
+**Session**
+- **User** -- logged-in email address
+- **Balance** -- current account balance
+
+**Usage (last 24h)**
+- **Requests** -- total number of requests processed
+- **Blocked (%)** -- number and percentage of requests blocked by scanning
+- **Warned (%)** -- number and percentage of requests that triggered warnings
+- **Cost** -- total USDC spent in the last 24 hours
+
+**Configuration**
+- **Config path** -- path to the active configuration file
+- **Logs path** -- path to the log file
+- **API endpoint** -- Stronghold API server URL
+- **Mode** -- scanning mode
+
+**Quick Actions** -- context-sensitive suggestions for next steps (e.g., enable proxy, fund wallet)

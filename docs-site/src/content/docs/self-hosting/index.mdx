@@ -1,0 +1,143 @@
+---
+title: "Self-Hosting"
+description: "Deploy Stronghold on your own infrastructure with Docker Compose."
+slug: self-hosting
+---
+
+Stronghold is MIT licensed and fully self-hostable. Docker Compose brings up the complete stack: PostgreSQL, API server, and x402 facilitator.
+
+## Quick Start
+
+```bash
+git clone https://github.com/yv-was-taken/stronghold.git && cd stronghold
+cp .env.example .env  # Configure environment variables
+docker-compose up -d
+
+# With HTTPS via Caddy reverse proxy
+docker-compose --profile with-proxy up -d
+```
+
+## VPS Requirements
+
+| Spec | Minimum | Recommended |
+|------|---------|-------------|
+| CPU | 2 vCPU | 4 vCPU |
+| RAM | 2 GB | 4 GB (for ML models) |
+| OS | Ubuntu 22.04+ or similar | Ubuntu 22.04+ or similar |
+
+The recommended spec accounts for the ONNX ML models used by the heuristic and classification layers. The minimum spec works but may see higher latency under load.
+
+## API Server Environment Variables
+
+### Core
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ENV` | No | `production` | Runtime environment (`production`, `development`, `test`) |
+| `DB_HOST` | No | `localhost` | PostgreSQL host |
+| `DB_PORT` | No | `5432` | PostgreSQL port |
+| `DB_USER` | No | `stronghold` | PostgreSQL user |
+| `DB_PASSWORD` | Production | - | PostgreSQL password |
+| `DB_NAME` | No | `stronghold` | PostgreSQL database name |
+| `DB_SSLMODE` | No | `require` | PostgreSQL SSL mode (`require`, `disable`, etc.) |
+| `JWT_SECRET` | Production | - | Authentication token signing (min 32 chars in production) |
+
+### x402 Payments
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `X402_EVM_WALLET_ADDRESS` | No | - | EVM USDC receiving address (Base). Required for payments to function. Server starts without it but all paid endpoints become free. |
+| `X402_SOLANA_WALLET_ADDRESS` | No | - | Solana USDC receiving address |
+| `X402_NETWORKS` | No | auto-detected | Supported networks, comma-separated (e.g. `base,solana`). Auto-detected from configured wallet addresses when not set. |
+| `X402_FACILITATOR_URL` | No | `https://x402.org/facilitator` | x402 facilitator URL |
+| `X402_SOLANA_FEE_PAYER` | No | - | Facilitator's Solana pubkey for paying tx fees. When set, clients use the facilitator as the fee payer so end-users don't need SOL. |
+
+### Stripe (fiat on-ramp)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `STRIPE_SECRET_KEY` | Production | - | Stripe secret key for wallet top-up |
+| `STRIPE_WEBHOOK_SECRET` | Production | - | Stripe webhook signing secret |
+| `STRIPE_PUBLISHABLE_KEY` | Production | - | Stripe publishable key (exposed to frontend) |
+
+### KMS (wallet key encryption)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `KMS_REGION` | Production | - | AWS region for KMS key (e.g. `us-east-1`) |
+| `KMS_KEY_ID` | Production | - | KMS key ARN or alias (e.g. `alias/stronghold-wallet-keys`) |
+
+### Scanner
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `STRONGHOLD_BLOCK_THRESHOLD` | No | `0.55` | Score threshold for BLOCK decision |
+| `STRONGHOLD_WARN_THRESHOLD` | No | `0.35` | Score threshold for WARN decision |
+| `STRONGHOLD_ENABLE_HUGOT` | No | `true` | Enable ML classification layer |
+| `STRONGHOLD_ENABLE_SEMANTICS` | No | `true` | Enable semantic similarity layer |
+
+### Additional Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `8080` | HTTP server listen port |
+| `DASHBOARD_URL` | No | `http://localhost:3000` | Dashboard URL for redirects and links |
+| `DASHBOARD_ALLOWED_ORIGINS` | No | `http://localhost:3000` | Comma-separated CORS allowed origins for the dashboard |
+| `COOKIE_DOMAIN` | No | - | Domain for authentication cookies |
+| `COOKIE_SECURE` | No | `true` | Set `Secure` flag on cookies (disable for local HTTP) |
+| `COOKIE_SAMESITE` | No | `Lax` | `SameSite` cookie attribute (`Lax`, `Strict`, `None`) |
+| `RATE_LIMIT_ENABLED` | No | `true` | Enable API rate limiting |
+| `RATE_LIMIT_MAX_REQUESTS` | No | `100` | Maximum requests per rate-limit window |
+| `STRONGHOLD_LLM_PROVIDER` | No | - | LLM provider for optional AI classification layer (e.g. `anthropic`, `openai`) |
+| `STRONGHOLD_LLM_API_KEY` | No | - | API key for the configured LLM provider |
+| `PRICE_SCAN_CONTENT` | No | `0.001` | Price in USDC per `/v1/scan/content` request |
+| `PRICE_SCAN_OUTPUT` | No | `0.001` | Price in USDC per `/v1/scan/output` request |
+
+Variables marked **Production** are required when `ENV=production` (the default). The server validates `JWT_SECRET`, `DB_PASSWORD`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `KMS_REGION`, and `KMS_KEY_ID` on startup and will refuse to start if they are missing.
+
+## x402 Facilitator Environment Variables
+
+The facilitator is the service that settles x402 payments on-chain. It needs funded wallets for gas fees.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `FACILITATOR_EVM_PRIVATE_KEY` | Yes | EVM settlement wallet private key |
+| `FACILITATOR_SOLANA_PRIVATE_KEY` | No | Solana settlement wallet private key |
+| `RPC_URL_BASE` | Yes | Base mainnet RPC endpoint |
+| `RPC_URL_SOLANA` | No | Solana mainnet RPC endpoint |
+| `RPC_URL_BASE_SEPOLIA` | No | Base Sepolia testnet RPC endpoint |
+| `RPC_URL_SOLANA_DEVNET` | No | Solana devnet RPC endpoint |
+
+### Gas and Fee Requirements
+
+- The **EVM facilitator wallet** needs ETH on Base for gas. Approximately 0.01 ETH covers ~90,000 payment settlements.
+- The **Solana facilitator wallet** needs SOL for transaction fees.
+
+## Database
+
+Stronghold uses **PostgreSQL 16**. Migrations are embedded in the API server binary and run automatically on startup. There is no manual migration step — just start the server and it handles schema creation and updates.
+
+## Development Mode
+
+To run Stronghold locally without real payments, set `ENV=development`. In development mode the server uses insecure defaults for missing secrets (JWT, database password) and skips Stripe/KMS validation, so you only need a running PostgreSQL instance to get started.
+
+```bash
+# Minimal dev setup — just needs PostgreSQL
+ENV=development docker-compose up -d
+ENV=development go run ./cmd/api
+```
+
+Note: The `ENV` variable defaults to `production`. You must explicitly set `ENV=development` to enable dev mode. Simply omitting wallet addresses does not bypass production validation.
+
+## Production Checklist
+
+Before exposing a self-hosted Stronghold instance to the internet:
+
+- Set `ENV=production` (this is the default).
+- Generate a strong `JWT_SECRET` (at least 32 characters): `openssl rand -base64 32`.
+- Set `DB_SSLMODE=require` (the default) for encrypted database connections. Docker Compose overrides this to `disable` for the local sidecar.
+- Configure `DASHBOARD_ALLOWED_ORIGINS` to your actual dashboard domain. Wildcard (`*`) is rejected when credentials are enabled.
+- Provide all three Stripe keys (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`).
+- Provision an AWS KMS key and set `KMS_REGION` and `KMS_KEY_ID` for wallet key encryption.
+- Fund the facilitator wallets: ~0.01 ETH on Base for EVM settlements, SOL on Solana if enabling Solana payments.
+- Use the Caddy profile (`--profile with-proxy`) or your own reverse proxy for TLS termination. The included Caddyfile is configured for `api.getstronghold.xyz`. Self-hosters must update the domain in `Caddyfile` to match their own domain, along with the CORS origins on lines 10-13.

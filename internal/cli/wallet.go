@@ -196,9 +196,8 @@ func AccountDeposit() error {
 	}
 
 	fmt.Println(accountInfoStyle.Render("Or visit the dashboard:"))
-	fmt.Println(accountInfoStyle.Render("  https://dashboard.stronghold.security"))
+	fmt.Println(accountInfoStyle.Render("  https://getstronghold.xyz/dashboard"))
 	fmt.Println(accountInfoStyle.Render("  - Pay with card via Stripe"))
-	fmt.Println(accountInfoStyle.Render("  - Coinbase Pay integration"))
 	fmt.Println()
 
 	fmt.Println(accountWarningStyle.Render("Important:"))
@@ -367,7 +366,7 @@ func ExportWallet(outputPath string) error {
 
 	if !config.Auth.LoggedIn {
 		fmt.Println(accountErrorStyle.Render("✗ Not logged in"))
-		fmt.Println(accountInfoStyle.Render("Run 'stronghold install' to set up your account"))
+		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' to set up your account"))
 		return nil
 	}
 
@@ -382,7 +381,7 @@ func ExportWallet(outputPath string) error {
 
 	if !w.Exists() {
 		fmt.Println(accountErrorStyle.Render("✗ No wallet found"))
-		fmt.Println(accountInfoStyle.Render("Run 'stronghold install' to set up your wallet"))
+		fmt.Println(accountInfoStyle.Render("Run 'stronghold init' to set up your wallet"))
 		return nil
 	}
 

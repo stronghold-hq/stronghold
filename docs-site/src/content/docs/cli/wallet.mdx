@@ -1,0 +1,104 @@
+---
+title: "wallet"
+description: "Manage Base (EVM) and Solana wallets."
+---
+
+The `stronghold wallet` subcommands manage the cryptographic wallets used for x402 payments on Base (EVM) and Solana.
+
+## Subcommands
+
+### wallet list
+
+```bash
+stronghold wallet list
+stronghold wallet show   # alias for wallet list
+```
+
+Lists all configured wallet addresses by chain. `wallet show` is an alias for `wallet list`.
+
+### wallet balance
+
+```bash
+stronghold wallet balance
+```
+
+Displays the current USDC balance for each configured wallet.
+
+### wallet export
+
+```bash
+stronghold wallet export
+stronghold wallet export --output /path/to/backup
+```
+
+Exports private keys to files for backup. The command prompts for confirmation before exporting. Existing backup files will not be overwritten -- choose a different path or remove the existing backup first.
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--output, -o` | string | Custom output path for backup files |
+
+Default backup paths:
+- EVM: `~/.stronghold/wallet-backup`
+- Solana: `~/.stronghold/wallet-backup-solana`
+
+### wallet replace
+
+```bash
+stronghold wallet replace <chain>
+```
+
+Replaces the wallet for a specific chain with a new private key.
+
+**Chain values**: `evm` (or `base`), `solana`
+
+**Key source precedence** (first match wins):
+
+1. `--file` flag -- reads key from the specified file
+2. Environment variable -- `STRONGHOLD_PRIVATE_KEY` for EVM, `STRONGHOLD_SOLANA_PRIVATE_KEY` for Solana
+3. Stdin -- pipe a key in
+4. Interactive prompt -- enter the key manually
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--file, -f` | string | Read private key from a file |
+| `--yes, -y` | bool | Skip confirmation prompts |
+
+**Server upload (EVM only):** When replacing an EVM wallet interactively, you are prompted to upload the private key to the server for multi-device setup. This requires TOTP verification. Server upload is **not supported for Solana wallets** -- Solana replacement only registers the public address with the server.
+
+Server registration is best-effort and only occurs if you are logged in with a valid account.
+
+### wallet link
+
+```bash
+stronghold wallet link
+```
+
+Registers wallet addresses with the Stronghold server. Requires TOTP verification. This is done automatically during `init` and `replace`, so manual linking is only needed in special circumstances.
+
+## Examples
+
+```bash
+# List all wallet addresses
+stronghold wallet list
+
+# Check wallet balances
+stronghold wallet balance
+
+# Replace EVM wallet interactively
+stronghold wallet replace evm
+
+# Replace Solana wallet interactively
+stronghold wallet replace solana
+
+# Replace EVM wallet from a key file
+stronghold wallet replace evm --file /path/to/key.txt
+
+# Replace EVM wallet from environment variable non-interactively
+STRONGHOLD_PRIVATE_KEY=0x... stronghold wallet replace evm --yes
+
+# Export wallet keys to default paths
+stronghold wallet export
+
+# Re-register wallets with the server
+stronghold wallet link
+```

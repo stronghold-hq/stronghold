@@ -1,0 +1,61 @@
+---
+title: "Introduction"
+description: "Overview of Stronghold — an AI security scanning platform that protects agents from prompt injection attacks and credential leaks."
+slug: getting-started
+---
+
+Stronghold is a pay-per-request AI security scanning platform that protects AI agents from **prompt injection attacks** and **credential leaks**. It is built on the [Citadel](https://github.com/TryMightyAI/citadel) AI security scanner and uses the [x402](https://www.x402.org/) HTTP payment protocol for frictionless, per-request billing.
+
+## The Problem
+
+AI agents interact with untrusted content from the internet — web pages, API responses, user messages, tool outputs. This content can contain **prompt injection attacks** that hijack the agent's behavior, or the agent itself can inadvertently leak **credentials and sensitive data** in its responses.
+
+Traditional security approaches require the agent to call a scanning API *after* it has already read the content. But if the content contains a prompt injection, the agent may have already been compromised before it gets a chance to check.
+
+## How Stronghold Solves It
+
+Stronghold provides **bidirectional protection** at the network level:
+
+```
+External content -> [PROXY scans] -> Agent -> [API scans] -> Output
+                     |                         |
+                  Injection               Credential leaks
+                  (INCOMING)              (OUTGOING)
+```
+
+- **Incoming content** is scanned for prompt injection by the transparent proxy *before* it reaches the agent. The agent never sees malicious content.
+- **Outgoing responses** are scanned for credential leaks by the API *before* they leave the system.
+
+This two-way architecture means attacks are caught at the perimeter, not inside the agent's reasoning loop.
+
+## Components
+
+Stronghold has three components:
+
+| Component | Description |
+|-----------|-------------|
+| **API Server** | Go/Fiber HTTP service that performs 4-layer security scanning. Accepts x402 payments per request. |
+| **CLI Client** | Cobra/Bubbletea command-line tool for system setup, proxy management, wallet operations, and account management. |
+| **Transparent Proxy** | Network-level traffic interceptor that routes all HTTP/HTTPS traffic through Stronghold scanning before it reaches the agent. |
+
+## 4-Layer Scanning
+
+Every scan request passes through up to four detection layers, from fastest to most thorough:
+
+1. **Heuristic** — Pattern matching against known injection signatures. Sub-millisecond.
+2. **ML Classification** — Citadel/Hugot neural network classifier. ~5ms.
+3. **Semantic Similarity** — Embedding-based comparison against known attack patterns. ~10ms.
+4. **LLM Analysis** (optional) — Any OpenRouter-compatible LLM reasoning about intent. ~500ms.
+
+Each layer produces a score. The scores combine into a final **decision**: `ALLOW`, `WARN`, or `BLOCK`.
+
+## Open Source and Self-Hostable
+
+Stronghold is MIT licensed. You can use the hosted service at `api.getstronghold.xyz` or deploy the entire stack yourself. See the [Self-Hosting](/self-hosting) guide for details.
+
+## Next Steps
+
+- [Why Network-Level Scanning](/getting-started/why-network-level) — understand why the proxy approach is fundamentally more secure
+- [Quickstart: Transparent Proxy](/getting-started/quickstart-proxy) — get the proxy running in under 5 minutes
+- [Quickstart: Direct API](/getting-started/quickstart-api) — use the REST API directly when the proxy cannot be installed
+- [Core Concepts](/getting-started/concepts) — key terms and concepts used throughout these docs

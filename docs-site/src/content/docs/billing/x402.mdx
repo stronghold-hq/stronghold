@@ -1,0 +1,116 @@
+---
+title: "x402 Protocol"
+description: "How x402 pay-per-request payments work with Stronghold."
+---
+
+[x402](https://www.x402.org/) is an HTTP payment protocol where clients pay per-request using signed crypto transactions. Stronghold uses x402 as its sole payment mechanism — there are no API keys, no subscriptions, and no separate billing accounts. Your wallet **is** your identity.
+
+## How It Works
+
+The x402 flow uses the HTTP `402 Payment Required` status code:
+
+1. **Client sends request** without a payment header.
+2. **Server returns 402** with payment requirements in the response body: recipient address, amount, supported networks, and facilitator URL.
+3. **Client signs a payment authorization** — an EIP-712 `TransferWithAuthorization` on EVM, or the Solana equivalent.
+4. **Client retries the request** with the signed payment in the `X-PAYMENT` header.
+5. **Server verifies the payment** via the facilitator service and settles the transaction on-chain.
+6. **Server returns the scan result** along with an `X-PAYMENT-RESPONSE` header confirming settlement.
+
+### 402 Response Body
+
+When the server returns a `402 Payment Required` response, the body contains the payment requirements:
+
+```json
+{
+  "error": "Payment required",
+  "payment_requirements": { /* first/primary network option */ },
+  "accepts": [ /* array of all network options */ ]
+}
+```
+
+Each entry in `accepts` includes the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `scheme` | Payment scheme identifier |
+| `network` | Blockchain network (e.g., `"base"`, `"solana"`) |
+| `recipient` | Wallet address to receive payment |
+| `amount` | Payment amount in token units |
+| `currency` | Token identifier (e.g., `"USDC"`) |
+| `facilitator_url` | URL of the facilitator service that settles the payment |
+| `description` | Human-readable description of the charge |
+| `fee_payer` | *(Solana only)* The facilitator's public key used to pay transaction fees |
+
+## Supported Networks
+
+| Network | Token | Chain | Use Case |
+|---------|-------|-------|----------|
+| base | USDC | EVM | Production (Base) |
+| base-sepolia | USDC | EVM | Testing |
+| solana | USDC | Solana | Production |
+| solana-devnet | USDC | Solana | Testing |
+
+## Client Integration
+
+You can integrate x402 payments into any HTTP client. Here is an illustrative example showing the concept:
+
+```javascript
+// Illustrative pseudocode — the actual import and setup depend on your
+// x402 client library. See https://www.x402.org/ for current SDKs.
+import { x402Client } from "x402-fetch";
+
+const fetchWithPayment = x402Client({
+  wallet: userWallet,
+  network: "base"
+});
+
+const result = await fetchWithPayment(
+  "https://api.getstronghold.xyz/v1/scan/output",
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: agentResponse })
+  }
+);
+```
+
+An x402-aware fetch wrapper handles the full 402 negotiation automatically: it detects the 402 response, signs the payment with your wallet, and retries the request with the `X-PAYMENT` header.
+
+## Automatic Payments via the Proxy
+
+When using the Stronghold [transparent proxy](/proxy/architecture/), x402 payments are handled entirely for you. The proxy intercepts outbound traffic, scans it, and signs payments using the wallet stored in your OS keyring. No code changes are needed on the agent side.
+
+## `X-PAYMENT-RESPONSE` Header
+
+On successful settlement, the server returns an `X-Payment-Response` header containing a JSON object:
+
+```json
+{
+  "payment_id": "<on-chain transaction hash>",
+  "status": "settled"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `payment_id` | string | The on-chain transaction hash from settlement. Despite the field name, this is a blockchain transaction identifier. |
+| `status` | string | Always `"settled"` on success |
+
+This header is only present when payment networks are configured (i.e., not in dev mode).
+
+## Atomic Reserve-Commit Model
+
+Stronghold uses an atomic reserve-commit pattern to ensure that either both service execution **and** payment settlement succeed, or neither does. The payment state machine progresses through:
+
+1. **reserved** — Payment nonce is recorded; funds are earmarked.
+2. **executing** — The scan handler is running.
+3. **settling** — Handler succeeded; the facilitator is settling the payment on-chain.
+4. **completed** — Settlement confirmed; the scan result is returned to the client.
+
+If the handler fails (returns a 4xx/5xx), the payment transitions from `executing` to `expired` and no charge occurs. If settlement fails after a successful scan, the server returns `503 Service Unavailable` with `"retry": true` and the scan result is **not** delivered — the client should retry with the same payment.
+
+Duplicate requests with the same payment nonce are idempotent: a completed transaction returns the cached result without re-executing or re-charging.
+
+## No API Keys
+
+There are no API keys to manage, rotate, or leak. Your cryptographic wallet serves as both your identity and your payment method. Every request is individually authorized and settled on-chain.

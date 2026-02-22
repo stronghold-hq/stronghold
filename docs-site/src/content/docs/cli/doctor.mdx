@@ -1,0 +1,33 @@
+---
+title: "doctor"
+description: "Check system prerequisites before installation."
+---
+
+`stronghold doctor` runs a series of system checks to verify that your machine meets all requirements for running the Stronghold proxy. Run this before `stronghold init` to catch issues early.
+
+## Usage
+
+```bash
+stronghold doctor
+```
+
+No root required.
+
+## Checks Performed
+
+| Check | Details |
+|-------|---------|
+| Operating system | Linux or macOS required |
+| Root/admin privileges | Verifies sudo or root access is available |
+| Firewall tools | iptables/nftables on Linux, pf on macOS |
+| NFTables backend (Linux) | Checks whether nftables is the active firewall backend; if so, uses nft-based rules instead of iptables |
+| Kernel modules | Required modules loaded (Linux only) |
+| Available ports | Port 8402 must be free |
+| Configuration permissions | Write access to configuration directories |
+| Binary installations | Presence of `stronghold` and `stronghold-proxy` binaries |
+
+## Output
+
+Each check reports a pass or fail status. If any check fails, the output explains what is needed to resolve the issue -- for example, a missing package to install or a port conflict to resolve.
+
+Run `stronghold doctor` again after making corrections to confirm everything passes before proceeding with `stronghold init`.

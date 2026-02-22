@@ -1,0 +1,61 @@
+---
+title: "init"
+description: "Initialize Stronghold proxy and create or login to your account."
+---
+
+`stronghold init` is the primary setup command. It walks through system compatibility checks, account creation or login, wallet setup, proxy configuration, service installation, and proxy startup.
+
+## Usage
+
+```bash
+sudo stronghold init [flags]
+```
+
+## Flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--yes, -y` | bool | Non-interactive mode with defaults |
+| `--private-key` | string | Import an existing EVM wallet (hex format, requires `--yes`) |
+| `--solana-private-key` | string | Import an existing Solana wallet (base58 format, requires `--yes`) |
+| `--account-number` | string | Login to an existing account (requires `--yes`) |
+| `--skip-service` | bool | Skip proxy binary install, service setup, and transparent proxy enable (account and wallet setup only). Does not require `sudo` since no system-level changes are made. |
+
+## What It Does
+
+1. **System check** -- verifies OS compatibility, firewall tools, and required kernel modules
+2. **Account setup** -- creates a new account or logs in to an existing one
+3. **Wallet creation** -- generates EVM (Base) and Solana wallets or imports provided keys
+4. **Proxy configuration** -- configures the transparent proxy settings
+5. **Service installation** -- installs and starts the system service
+6. **Proxy startup** -- enables firewall rules and begins intercepting traffic
+
+## Examples
+
+```bash
+# Interactive setup (recommended for first-time users)
+sudo stronghold init
+
+# Non-interactive with all defaults
+sudo stronghold init --yes
+
+# Import existing wallets during setup
+sudo stronghold init --yes --private-key 0x<hex> --solana-private-key <base58>
+
+# Account-only setup without proxy installation
+stronghold init --yes --skip-service
+
+# Login to an existing account
+stronghold init --yes --account-number XXXX-XXXX-XXXX-XXXX
+```
+
+## Key Formats
+
+- **EVM (Base)**: Hex-encoded private key, 64 characters, with optional `0x` prefix
+- **Solana**: Base58-encoded private key, approximately 87-88 characters
+
+## Important Notes
+
+Running `stronghold init` without `--skip-service` sets up a system-wide transparent proxy that intercepts **all** HTTP and HTTPS traffic on the machine. This requires root privileges because it modifies kernel-level firewall rules.
+
+If the account requires TOTP verification (new device login), `--account-number` will fail in non-interactive mode. Run `stronghold init` interactively to complete TOTP verification.
