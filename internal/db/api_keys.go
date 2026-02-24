@@ -22,8 +22,13 @@ type APIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
-// CreateAPIKey creates a new API key record
-func (db *DB) CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, keyHash, name string) (*APIKey, error) {
+// ErrAPIKeyLimitReached is returned when the account has reached the maximum number of active API keys.
+var ErrAPIKeyLimitReached = errors.New("API key limit reached")
+
+// CreateAPIKey creates a new API key record, enforcing a maximum number of active
+// keys per account. The cap is checked atomically under a row lock on the account
+// to prevent concurrent requests from exceeding the limit.
+func (db *DB) CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, keyHash, name string, maxKeys int) (*APIKey, error) {
 	key := &APIKey{
 		ID:        uuid.New(),
 		AccountID: accountID,
@@ -33,13 +38,37 @@ func (db *DB) CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, 
 		CreatedAt: time.Now().UTC(),
 	}
 
-	_, err := db.pool.Exec(ctx, `
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the account row to serialize concurrent key creation
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE id = $1 FOR UPDATE`, accountID).Scan(&lockedID); err != nil {
+		return nil, fmt.Errorf("failed to lock account: %w", err)
+	}
+
+	// Count active keys under the lock
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM api_keys WHERE account_id = $1 AND revoked_at IS NULL`, accountID).Scan(&count); err != nil {
+		return nil, fmt.Errorf("failed to count API keys: %w", err)
+	}
+	if count >= maxKeys {
+		return nil, ErrAPIKeyLimitReached
+	}
+
+	// Insert the key
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO api_keys (id, account_id, key_prefix, key_hash, name, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-	`, key.ID, key.AccountID, key.KeyPrefix, key.KeyHash, key.Name, key.CreatedAt)
-
-	if err != nil {
+	`, key.ID, key.AccountID, key.KeyPrefix, key.KeyHash, key.Name, key.CreatedAt); err != nil {
 		return nil, fmt.Errorf("failed to create API key: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit: %w", err)
 	}
 
 	return key, nil

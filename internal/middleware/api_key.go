@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"strings"
+	"time"
 
 	"stronghold/internal/db"
 
@@ -70,10 +71,13 @@ func (m *APIKeyMiddleware) Authenticate(c fiber.Ctx) (*db.Account, *db.APIKey, e
 	c.Locals("api_key_id", apiKey.ID.String())
 
 	// Async update last_used_at (use background context since Fiber's
-	// request context is recycled after the handler returns)
+	// request context is recycled after the handler returns).
+	// Bounded with a timeout to prevent goroutine accumulation if Postgres is slow.
 	keyID := apiKey.ID
 	go func() {
-		if err := m.db.UpdateAPIKeyLastUsed(context.Background(), keyID); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.db.UpdateAPIKeyLastUsed(ctx, keyID); err != nil {
 			slog.Debug("failed to update API key last_used_at", "error", err)
 		}
 	}()

@@ -107,10 +107,15 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		return handlerErr
 	}
 
-	// Mark event as processed after the handler succeeds. If the handler
-	// returned an error (above), we skip this so Stripe retries can reprocess.
-	if err := h.db.RecordWebhookEvent(c.Context(), event.ID, string(event.Type)); err != nil {
-		slog.Error("failed to record webhook event as processed", "event_id", event.ID, "error", err)
+	// Mark event as processed only when the handler wrote a 2xx response.
+	// Handlers signal failure via c.Status(4xx/5xx).JSON(...) which returns nil,
+	// so handlerErr alone is not sufficient — we must also check the status code
+	// to avoid marking failed events as processed (which would block Stripe retries).
+	status := c.Response().StatusCode()
+	if handled && status >= 200 && status < 300 {
+		if err := h.db.RecordWebhookEvent(c.Context(), event.ID, string(event.Type)); err != nil {
+			slog.Error("failed to record webhook event as processed", "event_id", event.ID, "error", err)
+		}
 	}
 
 	if !handled {

@@ -75,7 +75,7 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 
 	// Pre-check: verify the account has a way to pay before running the handler
 	hasCredits := account.BalanceUSDC >= price
-	hasMetered := account.StripeCustomerID != nil && *account.StripeCustomerID != ""
+	hasMetered := pr.meter != nil && account.StripeCustomerID != nil && *account.StripeCustomerID != ""
 
 	if !hasCredits && !hasMetered {
 		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
@@ -111,7 +111,7 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	}
 
 	// Fall back to metered billing
-	if hasMetered && pr.meter != nil {
+	if hasMetered {
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price); err != nil {
 			slog.Error("metered billing failed", "account_id", account.ID, "error", err)
 			c.Response().Reset()

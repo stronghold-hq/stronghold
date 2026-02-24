@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -83,20 +84,6 @@ func (h *APIKeyHandler) Create(c fiber.Ctx) error {
 		})
 	}
 
-	// Check key limit
-	count, err := h.db.CountActiveAPIKeys(c.Context(), accountID)
-	if err != nil {
-		slog.Error("failed to count API keys", "error", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to create API key",
-		})
-	}
-	if count >= maxAPIKeysPerAccount {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fmt.Sprintf("Maximum of %d active API keys per account", maxAPIKeysPerAccount),
-		})
-	}
-
 	// Generate key: sk_live_ + 32 random hex chars
 	randomBytes := make([]byte, 16)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -111,9 +98,14 @@ func (h *APIKeyHandler) Create(c fiber.Ctx) error {
 	hash := sha256.Sum256([]byte(fullKey))
 	keyHash := hex.EncodeToString(hash[:])
 
-	// Store
-	apiKey, err := h.db.CreateAPIKey(c.Context(), accountID, keyPrefix, keyHash, req.Name)
+	// Atomically check key cap and insert (serialized via account row lock)
+	apiKey, err := h.db.CreateAPIKey(c.Context(), accountID, keyPrefix, keyHash, req.Name, maxAPIKeysPerAccount)
 	if err != nil {
+		if errors.Is(err, db.ErrAPIKeyLimitReached) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": fmt.Sprintf("Maximum of %d active API keys per account", maxAPIKeysPerAccount),
+			})
+		}
 		slog.Error("failed to create API key", "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create API key",
