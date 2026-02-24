@@ -225,32 +225,27 @@ func (h *B2BBillingHandler) CreateBillingPortalSession(c fiber.Ctx) error {
 	})
 }
 
-// getB2BAccountID extracts account ID and verifies it's a B2B account
+// getB2BAccountID extracts account ID and verifies it's a B2B account.
+// Returns fiber.NewError so the global error handler formats the response
+// and the caller stops execution (c.Status().JSON() returns nil, which
+// would let callers continue with uuid.Nil).
 func (h *B2BBillingHandler) getB2BAccountID(c fiber.Ctx) (uuid.UUID, error) {
 	accountIDStr := c.Locals("account_id")
 	if accountIDStr == nil {
-		return uuid.UUID{}, c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Authentication required",
-		})
+		return uuid.UUID{}, fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 	accountID, err := uuid.Parse(accountIDStr.(string))
 	if err != nil {
-		return uuid.UUID{}, c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Invalid account ID",
-		})
+		return uuid.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Invalid account ID")
 	}
 
 	// Verify B2B
 	account, err := h.db.GetAccountByID(c.Context(), accountID)
 	if err != nil {
-		return uuid.UUID{}, c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Account not found",
-		})
+		return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
 	}
 	if account.AccountType != db.AccountTypeB2B {
-		return uuid.UUID{}, c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Billing is only available for business accounts",
-		})
+		return uuid.UUID{}, fiber.NewError(fiber.StatusForbidden, "Billing is only available for business accounts")
 	}
 
 	return accountID, nil

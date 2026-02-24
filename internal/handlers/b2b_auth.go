@@ -92,6 +92,16 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 		})
 	}
 
+	// Stripe is required for B2B billing — without a stripe_customer_id the
+	// account cannot purchase credits or use metered billing. Reject early
+	// before creating the account.
+	if h.stripeConfig.SecretKey == "" {
+		slog.Error("B2B registration rejected: Stripe not configured")
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Business account registration is temporarily unavailable",
+		})
+	}
+
 	// Hash password
 	passwordHash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -116,36 +126,32 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 			"error": "Failed to create account",
 		})
 	}
-
-	// Create Stripe Customer (required for B2B billing to work)
-	if h.stripeConfig.SecretKey != "" {
-		stripe.Key = h.stripeConfig.SecretKey
-		params := &stripe.CustomerParams{
-			Email: stripe.String(req.Email),
-			Name:  stripe.String(req.CompanyName),
-		}
-		params.AddMetadata("account_id", account.ID.String())
-		params.AddMetadata("account_type", "b2b")
-
-		cust, err := customer.New(params)
-		if err != nil {
-			slog.Error("failed to create Stripe customer, rolling back account",
-				"account_id", account.ID, "error", err)
-			h.db.DeleteAccount(ctx, account.ID)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to set up billing. Please try again.",
-			})
-		}
-		if err := h.db.UpdateStripeCustomerID(ctx, account.ID, cust.ID); err != nil {
-			slog.Error("failed to store Stripe customer ID, rolling back account",
-				"account_id", account.ID, "error", err)
-			h.db.DeleteAccount(ctx, account.ID)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to set up billing. Please try again.",
-			})
-		}
-		account.StripeCustomerID = &cust.ID
+	stripe.Key = h.stripeConfig.SecretKey
+	params := &stripe.CustomerParams{
+		Email: stripe.String(req.Email),
+		Name:  stripe.String(req.CompanyName),
 	}
+	params.AddMetadata("account_id", account.ID.String())
+	params.AddMetadata("account_type", "b2b")
+
+	cust, err := customer.New(params)
+	if err != nil {
+		slog.Error("failed to create Stripe customer, rolling back account",
+			"account_id", account.ID, "error", err)
+		h.db.DeleteAccount(ctx, account.ID)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to set up billing. Please try again.",
+		})
+	}
+	if err := h.db.UpdateStripeCustomerID(ctx, account.ID, cust.ID); err != nil {
+		slog.Error("failed to store Stripe customer ID, rolling back account",
+			"account_id", account.ID, "error", err)
+		h.db.DeleteAccount(ctx, account.ID)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to set up billing. Please try again.",
+		})
+	}
+	account.StripeCustomerID = &cust.ID
 
 	// Create session
 	ip := c.IP()
