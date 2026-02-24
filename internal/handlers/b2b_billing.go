@@ -136,6 +136,9 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		slog.Error("failed to create Stripe checkout session", "error", err)
+		if failErr := h.db.FailDeposit(c.Context(), deposit.ID, err.Error()); failErr != nil {
+			slog.Error("failed to mark deposit as failed", "deposit_id", deposit.ID, "error", failErr)
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create checkout session",
 		})

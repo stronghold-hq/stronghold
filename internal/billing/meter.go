@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,6 +15,9 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/billing/meterevent"
 )
+
+// ErrMeteringNotConfigured is returned when Stripe metering config is missing.
+var ErrMeteringNotConfigured = errors.New("stripe metering not configured")
 
 // MeterReporter reports B2B API usage to Stripe's Meter API
 type MeterReporter struct {
@@ -32,11 +36,7 @@ func NewMeterReporter(database *db.DB, stripeConfig *config.StripeConfig) *Meter
 // ReportUsage reports a metered API usage event to Stripe and records it locally
 func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, endpoint string, amountMicroUSDC usdc.MicroUSDC) error {
 	if m.stripeConfig.SecretKey == "" || m.stripeConfig.MeterID == "" {
-		slog.Warn("Stripe metering not configured, skipping usage report",
-			"account_id", accountID,
-			"endpoint", endpoint,
-		)
-		return nil
+		return ErrMeteringNotConfigured
 	}
 
 	stripe.Key = m.stripeConfig.SecretKey

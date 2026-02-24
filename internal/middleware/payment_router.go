@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -56,11 +57,10 @@ func (pr *PaymentRouter) Route(price usdc.MicroUSDC) fiber.Handler {
 			}
 		}
 
-		// Path 3: Neither header present → 402 Payment Required
-		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
-			"error":   "Payment required",
-			"message": "Include an X-PAYMENT header (x402 crypto) or Authorization: Bearer sk_live_... (API key)",
-		})
+		// Path 3: Neither header present → delegate to x402 handler.
+		// In dev mode (no payment networks configured), x402 passes through.
+		// In production, x402 returns its own 402 with payment instructions.
+		return x402Handler(c)
 	}
 }
 
@@ -113,6 +113,16 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	// Fall back to metered billing
 	if hasMetered && pr.meter != nil {
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price); err != nil {
+			if errors.Is(err, billing.ErrMeteringNotConfigured) {
+				// Metering config is permanently missing — cannot bill
+				slog.Error("metered billing unavailable: stripe metering not configured",
+					"account_id", account.ID)
+				c.Response().Reset()
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Billing configuration error",
+				})
+			}
+			// Transient Stripe error — usage recorded locally for reconciliation
 			slog.Error("failed to report metered usage", "account_id", account.ID, "error", err)
 		}
 		pr.logUsage(c, account.ID, price, "metered")
