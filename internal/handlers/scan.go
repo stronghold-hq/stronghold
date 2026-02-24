@@ -293,7 +293,7 @@ func (h *ScanHandler) logB2BUsage(c fiber.Ctx, result *stronghold.ScanResult, en
 		RequestID:      result.RequestID,
 		Endpoint:       endpoint,
 		Method:         "POST",
-		CostUSDC:       cost,
+		CostUSDC:       0,
 		Status:         "success",
 		ThreatDetected: threatDetected,
 		ThreatType:     threatType,

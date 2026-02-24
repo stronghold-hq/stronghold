@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"stronghold/internal/db"
 
 	"github.com/gofiber/fiber/v3"
@@ -127,8 +128,13 @@ func (h *APIKeyHandler) RevokeAPIKey(c fiber.Ctx) error {
 	}
 
 	if err := h.db.RevokeAPIKey(c.Context(), accountID, keyID); err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "API key not found or already revoked",
+		if errors.Is(err, db.ErrAPIKeyNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "API key not found or already revoked",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to revoke API key",
 		})
 	}
 

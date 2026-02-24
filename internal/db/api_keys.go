@@ -12,6 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// ErrAPIKeyNotFound is returned when an API key is not found or already revoked.
+var ErrAPIKeyNotFound = errors.New("api key not found or already revoked")
+
 // APIKey represents an API key for B2B authentication
 type APIKey struct {
 	ID         uuid.UUID  `json:"id"`
@@ -127,7 +130,7 @@ func (db *DB) RevokeAPIKey(ctx context.Context, accountID uuid.UUID, keyID uuid.
 	}
 
 	if result.RowsAffected() == 0 {
-		return errors.New("api key not found or already revoked")
+		return ErrAPIKeyNotFound
 	}
 
 	return nil
