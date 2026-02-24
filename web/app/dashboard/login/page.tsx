@@ -8,14 +8,19 @@ import Logo from '@/components/Logo';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { formatAccountNumber, isValidAccountNumber } from '@/lib/utils';
 
+type LoginTab = 'personal' | 'business';
+
 export default function LoginPage() {
+  const [tab, setTab] = useState<LoginTab>('personal');
   const [accountNumber, setAccountNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
   const [ttlDays, setTtlDays] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { login, verifyTotp, resetTotp, totpRequired, isAuthenticated, isLoading } = useAuth();
+  const { login, verifyTotp, resetTotp, b2bLogin, totpRequired, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -27,6 +32,11 @@ export default function LoginPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatAccountNumber(e.target.value);
     setAccountNumber(formatted);
+    setError('');
+  };
+
+  const handleTabChange = (newTab: LoginTab) => {
+    setTab(newTab);
     setError('');
   };
 
@@ -45,6 +55,23 @@ export default function LoginPage() {
         router.push('/dashboard/main');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'TOTP verification failed');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    if (tab === 'business') {
+      if (!email.trim() || !password) {
+        setError('Please enter your email and password');
+        return;
+      }
+      setIsSubmitting(true);
+      try {
+        await b2bLogin(email.trim(), password);
+        router.push('/dashboard/main');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Login failed');
       } finally {
         setIsSubmitting(false);
       }
@@ -84,6 +111,9 @@ export default function LoginPage() {
     );
   }
 
+  const isB2BFormValid = email.trim().length > 0 && password.length > 0;
+  const isB2CFormValid = accountNumber.length >= 19;
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-4">
       <motion.div
@@ -103,32 +133,45 @@ export default function LoginPage() {
         {/* Login Card */}
         <div className="bg-[#111111] border border-[#222] rounded-2xl p-8">
           <h1 className="text-2xl font-bold text-white mb-2">Welcome back</h1>
+
+          {/* Tab Toggle - only show when TOTP is not required */}
+          {!totpRequired && (
+            <div className="flex bg-[#0a0a0a] rounded-lg p-1 mb-6">
+              <button
+                type="button"
+                onClick={() => handleTabChange('personal')}
+                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                  tab === 'personal'
+                    ? 'bg-[#222] text-white'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                Personal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange('business')}
+                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                  tab === 'business'
+                    ? 'bg-[#222] text-white'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                Business
+              </button>
+            </div>
+          )}
+
           <p className="text-gray-400 mb-6">
             {totpRequired
               ? 'Enter your TOTP or recovery code to trust this device'
-              : 'Enter your account number to access your dashboard'}
+              : tab === 'business'
+                ? 'Sign in with your business email and password'
+                : 'Enter your account number to access your dashboard'}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {!totpRequired ? (
-              <div>
-                <label
-                  htmlFor="accountNumber"
-                  className="block text-sm font-medium text-gray-300 mb-2"
-                >
-                  Account Number
-                </label>
-                <input
-                  type="text"
-                  id="accountNumber"
-                  value={accountNumber}
-                  onChange={handleInputChange}
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
-                  maxLength={19}
-                  className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors font-mono text-lg tracking-wider"
-                />
-              </div>
-            ) : (
+            {totpRequired ? (
               <>
                 <div>
                   <label
@@ -178,6 +221,59 @@ export default function LoginPage() {
                   Go Back
                 </button>
               </>
+            ) : tab === 'business' ? (
+              <>
+                <div>
+                  <label
+                    htmlFor="email"
+                    className="block text-sm font-medium text-gray-300 mb-2"
+                  >
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    id="email"
+                    value={email}
+                    onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                    placeholder="you@company.com"
+                    className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="password"
+                    className="block text-sm font-medium text-gray-300 mb-2"
+                  >
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    id="password"
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                    placeholder="Enter your password"
+                    className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors"
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label
+                  htmlFor="accountNumber"
+                  className="block text-sm font-medium text-gray-300 mb-2"
+                >
+                  Account Number
+                </label>
+                <input
+                  type="text"
+                  id="accountNumber"
+                  value={accountNumber}
+                  onChange={handleInputChange}
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  maxLength={19}
+                  className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors font-mono text-lg tracking-wider"
+                />
+              </div>
             )}
 
             {error && (
@@ -195,8 +291,9 @@ export default function LoginPage() {
               type="submit"
               disabled={
                 isSubmitting ||
-                (!totpRequired && accountNumber.length < 19) ||
-                (totpRequired && totpCode.trim().length === 0)
+                (totpRequired && totpCode.trim().length === 0) ||
+                (!totpRequired && tab === 'personal' && !isB2CFormValid) ||
+                (!totpRequired && tab === 'business' && !isB2BFormValid)
               }
               className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
             >
@@ -213,15 +310,27 @@ export default function LoginPage() {
 
           {!totpRequired && (
             <div className="mt-6 pt-6 border-t border-[#222] text-center">
-              <p className="text-gray-400 text-sm">
-                Don&apos;t have an account?{' '}
-                <a
-                  href="/dashboard/create"
-                  className="text-[#00D4AA] hover:underline"
-                >
-                  Create one
-                </a>
-              </p>
+              {tab === 'business' ? (
+                <p className="text-gray-400 text-sm">
+                  Need a business account?{' '}
+                  <a
+                    href="/dashboard/b2b/create"
+                    className="text-[#00D4AA] hover:underline"
+                  >
+                    Sign up here
+                  </a>
+                </p>
+              ) : (
+                <p className="text-gray-400 text-sm">
+                  Don&apos;t have an account?{' '}
+                  <a
+                    href="/dashboard/create"
+                    className="text-[#00D4AA] hover:underline"
+                  >
+                    Create one
+                  </a>
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -230,7 +339,9 @@ export default function LoginPage() {
         <p className="text-center text-gray-500 text-sm mt-6">
           {totpRequired
             ? 'This device is not trusted yet. Enter your TOTP to continue.'
-            : 'Your account number is your password. Store it securely.'}
+            : tab === 'business'
+              ? 'Business accounts use email and password authentication.'
+              : 'Your account number is your password. Store it securely.'}
         </p>
       </motion.div>
     </div>

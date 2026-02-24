@@ -20,13 +20,18 @@ type Database interface {
 
 	// Account operations
 	CreateAccount(ctx context.Context, evmWalletAddress *string, solanaWalletAddress *string) (*Account, error)
+	CreateB2BAccount(ctx context.Context, email, passwordHash, companyName string) (*Account, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error)
 	GetAccountByNumber(ctx context.Context, accountNumber string) (*Account, error)
+	GetAccountByEmail(ctx context.Context, email string) (*Account, error)
 	GetAccountByWalletAddress(ctx context.Context, walletAddress string) (*Account, error)
 	GetAccountByEVMWallet(ctx context.Context, evmAddress string) (*Account, error)
 	GetAccountBySolanaWallet(ctx context.Context, solanaAddress string) (*Account, error)
+	GetAccountByStripeCustomerID(ctx context.Context, customerID string) (*Account, error)
 	UpdateAccount(ctx context.Context, account *Account) error
 	UpdateLastLogin(ctx context.Context, accountID uuid.UUID) error
+	UpdateStripeCustomerID(ctx context.Context, accountID uuid.UUID, customerID string) error
+	DeductBalance(ctx context.Context, accountID uuid.UUID, amount usdc.MicroUSDC) (bool, error)
 	LinkWallet(ctx context.Context, accountID uuid.UUID, walletAddress string) error
 	LinkEVMWallet(ctx context.Context, accountID uuid.UUID, evmAddress string) error
 	LinkSolanaWallet(ctx context.Context, accountID uuid.UUID, solanaAddress string) error
@@ -39,6 +44,18 @@ type Database interface {
 	HasEncryptedKey(ctx context.Context, accountID uuid.UUID) (bool, error)
 	UpdateWalletAddress(ctx context.Context, accountID uuid.UUID, walletAddress string) error
 	UpdateWalletAddresses(ctx context.Context, accountID uuid.UUID, evmAddr *string, solanaAddr *string) error
+
+	// API key operations
+	CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, keyHash, name string) (*APIKey, error)
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
+	ListAPIKeys(ctx context.Context, accountID uuid.UUID) ([]APIKey, error)
+	RevokeAPIKey(ctx context.Context, keyID, accountID uuid.UUID) error
+	UpdateAPIKeyLastUsed(ctx context.Context, keyID uuid.UUID) error
+	CountActiveAPIKeys(ctx context.Context, accountID uuid.UUID) (int, error)
+
+	// Stripe usage record operations
+	CreateStripeUsageRecord(ctx context.Context, record *StripeUsageRecord) (*StripeUsageRecord, error)
+	GetStripeUsageRecords(ctx context.Context, accountID uuid.UUID, limit, offset int) ([]StripeUsageRecord, error)
 
 	// Session operations
 	CreateSession(ctx context.Context, accountID uuid.UUID, ipAddress net.IP, userAgent string, duration time.Duration) (*Session, string, error)

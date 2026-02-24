@@ -114,6 +114,7 @@ type StripeConfig struct {
 	SecretKey      string
 	WebhookSecret  string
 	PublishableKey string
+	MeterID        string // Stripe Meter ID for B2B metered billing
 }
 
 // StrongholdConfig holds Stronghold scanner configuration
@@ -200,6 +201,7 @@ func Load() *Config {
 			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),
 			WebhookSecret:  getEnv("STRIPE_WEBHOOK_SECRET", ""),
 			PublishableKey: getEnv("STRIPE_PUBLISHABLE_KEY", ""),
+			MeterID:        getEnv("STRIPE_METER_ID", ""),
 		},
 		Stronghold: StrongholdConfig{
 			BlockThreshold:  getFloat("STRONGHOLD_BLOCK_THRESHOLD", 0.55),

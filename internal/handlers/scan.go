@@ -13,10 +13,11 @@ import (
 
 // ScanHandler handles scan-related endpoints
 type ScanHandler struct {
-	scanner *stronghold.Scanner
-	x402    *middleware.X402Middleware
-	db      *db.DB
-	pricing *config.PricingConfig
+	scanner       *stronghold.Scanner
+	x402          *middleware.X402Middleware
+	db            *db.DB
+	pricing       *config.PricingConfig
+	paymentRouter *middleware.PaymentRouter
 }
 
 // NewScanHandlerWithDB creates a new scan handler with database support
@@ -26,6 +27,17 @@ func NewScanHandlerWithDB(scanner *stronghold.Scanner, x402 *middleware.X402Midd
 		x402:    x402,
 		db:      database,
 		pricing: pricing,
+	}
+}
+
+// NewScanHandlerWithPaymentRouter creates a new scan handler with payment router support
+func NewScanHandlerWithPaymentRouter(scanner *stronghold.Scanner, x402 *middleware.X402Middleware, database *db.DB, pricing *config.PricingConfig, router *middleware.PaymentRouter) *ScanHandler {
+	return &ScanHandler{
+		scanner:       scanner,
+		x402:          x402,
+		db:            database,
+		pricing:       pricing,
+		paymentRouter: router,
 	}
 }
 
@@ -60,11 +72,15 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 
 	group := app.Group("/v1/scan")
 
-	// Content scanning - detect prompt injection in external content
-	group.Post("/content", h.x402.AtomicPayment(h.pricing.ScanContent), h.ScanContent)
-
-	// Output scanning - detect credential leaks in LLM responses
-	group.Post("/output", h.x402.AtomicPayment(h.pricing.ScanOutput), h.ScanOutput)
+	// Use PaymentRouter if available (supports both x402 and API key auth),
+	// otherwise fall back to x402-only middleware
+	if h.paymentRouter != nil {
+		group.Post("/content", h.paymentRouter.Route(h.pricing.ScanContent), h.ScanContent)
+		group.Post("/output", h.paymentRouter.Route(h.pricing.ScanOutput), h.ScanOutput)
+	} else {
+		group.Post("/content", h.x402.AtomicPayment(h.pricing.ScanContent), h.ScanContent)
+		group.Post("/output", h.x402.AtomicPayment(h.pricing.ScanOutput), h.ScanOutput)
+	}
 }
 
 // ScanContent handles content scanning for prompt injection

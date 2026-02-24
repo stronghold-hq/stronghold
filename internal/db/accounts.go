@@ -26,6 +26,12 @@ const (
 	AccountStatusClosed    AccountStatus = "closed"
 )
 
+// AccountType discriminator
+const (
+	AccountTypeB2C = "b2c"
+	AccountTypeB2B = "b2b"
+)
+
 var (
 	evmWalletAddressRegex    = regexp.MustCompile(`^0x[a-fA-F0-9]{40}$`)
 	solanaWalletAddressRegex = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{32,44}$`)
@@ -36,12 +42,44 @@ var (
 	ErrSolanaWalletAddressConflict = errors.New("solana wallet address already linked to another account")
 	ErrInvalidEVMWalletAddress     = errors.New("invalid evm wallet address")
 	ErrInvalidSolanaWalletAddress  = errors.New("invalid solana wallet address")
+	ErrEmailAlreadyExists          = errors.New("email already registered")
 )
+
+// accountSelectColumns is the standard column list for account queries.
+const accountSelectColumns = `id, account_number, account_type, evm_wallet_address, solana_wallet_address,
+       balance_usdc, status, wallet_escrow_enabled, totp_enabled,
+       created_at, updated_at, last_login_at, metadata,
+       email, company_name, password_hash, stripe_customer_id`
+
+// scanAccount scans a row into an Account struct matching accountSelectColumns.
+func scanAccount(row interface{ Scan(dest ...any) error }) (*Account, error) {
+	account := &Account{}
+	var accountNumber *string // nullable for B2B accounts
+	err := row.Scan(
+		&account.ID, &accountNumber, &account.AccountType,
+		&account.EVMWalletAddress, &account.SolanaWalletAddress,
+		&account.BalanceUSDC, &account.Status,
+		&account.WalletEscrow, &account.TOTPEnabled,
+		&account.CreatedAt, &account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
+		&account.Email, &account.CompanyName, &account.PasswordHash, &account.StripeCustomerID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("account not found")
+		}
+		return nil, fmt.Errorf("failed to scan account: %w", err)
+	}
+	if accountNumber != nil {
+		account.AccountNumber = *accountNumber
+	}
+	return account, nil
+}
 
 // Account represents a Stronghold account
 type Account struct {
 	ID                  uuid.UUID      `json:"id"`
 	AccountNumber       string         `json:"account_number"`
+	AccountType         string         `json:"account_type"`
 	EVMWalletAddress    *string        `json:"evm_wallet_address,omitempty"`
 	SolanaWalletAddress *string        `json:"solana_wallet_address,omitempty"`
 	BalanceUSDC         usdc.MicroUSDC `json:"balance_usdc"`
@@ -52,6 +90,11 @@ type Account struct {
 	UpdatedAt           time.Time      `json:"updated_at"`
 	LastLoginAt         *time.Time     `json:"last_login_at,omitempty"`
 	Metadata            map[string]any `json:"metadata,omitempty"`
+	// B2B fields
+	Email            *string `json:"email,omitempty"`
+	CompanyName      *string `json:"company_name,omitempty"`
+	PasswordHash     *string `json:"-"`
+	StripeCustomerID *string `json:"stripe_customer_id,omitempty"`
 	// Encrypted wallet key fields - never exposed via JSON
 	EncryptedPrivateKey *string    `json:"-"`
 	KMSKeyID            *string    `json:"-"`
@@ -73,7 +116,7 @@ func GenerateAccountNumber() (string, error) {
 	return strings.Join(parts, "-"), nil
 }
 
-// CreateAccount creates a new account with a generated account number
+// CreateAccount creates a new B2C account with a generated account number
 func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solanaWalletAddress *string) (*Account, error) {
 	// Generate unique account number
 	var accountNumber string
@@ -110,6 +153,7 @@ func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solan
 	account := &Account{
 		ID:                  uuid.New(),
 		AccountNumber:       accountNumber,
+		AccountType:         AccountTypeB2C,
 		EVMWalletAddress:    evmWalletAddress,
 		SolanaWalletAddress: solanaWalletAddress,
 		BalanceUSDC:         0,
@@ -120,9 +164,9 @@ func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solan
 	}
 
 	_, err = db.pool.Exec(ctx, `
-		INSERT INTO accounts (id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status, created_at, updated_at, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, account.ID, account.AccountNumber, account.EVMWalletAddress, account.SolanaWalletAddress,
+		INSERT INTO accounts (id, account_number, account_type, evm_wallet_address, solana_wallet_address, balance_usdc, status, created_at, updated_at, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, account.ID, account.AccountNumber, account.AccountType, account.EVMWalletAddress, account.SolanaWalletAddress,
 		account.BalanceUSDC, account.Status, account.CreatedAt, account.UpdatedAt, account.Metadata)
 
 	if err != nil {
@@ -132,61 +176,87 @@ func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solan
 	return account, nil
 }
 
-// GetAccountByID retrieves an account by its UUID
-func (db *DB) GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error) {
-	account := &Account{}
-	err := db.QueryRow(ctx, `
-		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
-		       wallet_escrow_enabled, totp_enabled,
-		       created_at, updated_at, last_login_at, metadata
-		FROM accounts
-		WHERE id = $1
-	`, id).Scan(
-		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
-		&account.BalanceUSDC, &account.Status,
-		&account.WalletEscrow, &account.TOTPEnabled,
-		&account.CreatedAt,
-		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
-	)
+// CreateB2BAccount creates a new B2B account with email/password auth
+func (db *DB) CreateB2BAccount(ctx context.Context, email, passwordHash, companyName string) (*Account, error) {
+	account := &Account{
+		ID:           uuid.New(),
+		AccountType:  AccountTypeB2B,
+		Email:        &email,
+		CompanyName:  &companyName,
+		PasswordHash: &passwordHash,
+		BalanceUSDC:  0,
+		Status:       AccountStatusActive,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+		Metadata:     make(map[string]any),
+	}
+
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO accounts (id, account_type, email, company_name, password_hash, balance_usdc, status, created_at, updated_at, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, account.ID, account.AccountType, account.Email, account.CompanyName, account.PasswordHash,
+		account.BalanceUSDC, account.Status, account.CreatedAt, account.UpdatedAt, account.Metadata)
 
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("account not found")
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if strings.Contains(pgErr.ConstraintName, "email") {
+				return nil, ErrEmailAlreadyExists
+			}
 		}
-		return nil, fmt.Errorf("failed to get account: %w", err)
+		return nil, fmt.Errorf("failed to create B2B account: %w", err)
 	}
 
 	return account, nil
 }
 
+// GetAccountByEmail retrieves a B2B account by email address
+func (db *DB) GetAccountByEmail(ctx context.Context, email string) (*Account, error) {
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE email = $1`, email))
+}
+
+// UpdateStripeCustomerID updates the Stripe customer ID for an account
+func (db *DB) UpdateStripeCustomerID(ctx context.Context, accountID uuid.UUID, customerID string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts SET stripe_customer_id = $1, updated_at = $2 WHERE id = $3
+	`, customerID, time.Now().UTC(), accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update stripe customer ID: %w", err)
+	}
+	return nil
+}
+
+// GetAccountByStripeCustomerID retrieves an account by Stripe customer ID
+func (db *DB) GetAccountByStripeCustomerID(ctx context.Context, customerID string) (*Account, error) {
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE stripe_customer_id = $1`, customerID))
+}
+
+// DeductBalance atomically deducts from account balance. Returns true if deduction succeeded
+// (balance was sufficient), false if balance was insufficient.
+func (db *DB) DeductBalance(ctx context.Context, accountID uuid.UUID, amount usdc.MicroUSDC) (bool, error) {
+	result, err := db.pool.Exec(ctx, `
+		UPDATE accounts SET balance_usdc = balance_usdc - $1, updated_at = $2
+		WHERE id = $3 AND balance_usdc >= $1
+	`, amount, time.Now().UTC(), accountID)
+	if err != nil {
+		return false, fmt.Errorf("failed to deduct balance: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// GetAccountByID retrieves an account by its UUID
+func (db *DB) GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error) {
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE id = $1`, id))
+}
+
 // GetAccountByNumber retrieves an account by its account number
 func (db *DB) GetAccountByNumber(ctx context.Context, accountNumber string) (*Account, error) {
-	// Normalize the account number (remove any existing dashes and reformat)
 	normalized := normalizeAccountNumber(accountNumber)
-
-	account := &Account{}
-	err := db.QueryRow(ctx, `
-		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
-		       wallet_escrow_enabled, totp_enabled,
-		       created_at, updated_at, last_login_at, metadata
-		FROM accounts
-		WHERE account_number = $1
-	`, normalized).Scan(
-		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
-		&account.BalanceUSDC, &account.Status,
-		&account.WalletEscrow, &account.TOTPEnabled,
-		&account.CreatedAt,
-		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
-	)
-
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("account not found")
-		}
-		return nil, fmt.Errorf("failed to get account: %w", err)
-	}
-
-	return account, nil
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE account_number = $1`, normalized))
 }
 
 // GetAccountByWalletAddress retrieves an account by wallet address, auto-detecting chain by format.
@@ -200,56 +270,14 @@ func (db *DB) GetAccountByWalletAddress(ctx context.Context, walletAddress strin
 
 // GetAccountByEVMWallet retrieves an account by its EVM wallet address
 func (db *DB) GetAccountByEVMWallet(ctx context.Context, evmAddress string) (*Account, error) {
-	account := &Account{}
-	err := db.QueryRow(ctx, `
-		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
-		       wallet_escrow_enabled, totp_enabled,
-		       created_at, updated_at, last_login_at, metadata
-		FROM accounts
-		WHERE evm_wallet_address = $1
-	`, evmAddress).Scan(
-		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
-		&account.BalanceUSDC, &account.Status,
-		&account.WalletEscrow, &account.TOTPEnabled,
-		&account.CreatedAt,
-		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
-	)
-
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("account not found")
-		}
-		return nil, fmt.Errorf("failed to get account: %w", err)
-	}
-
-	return account, nil
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE evm_wallet_address = $1`, evmAddress))
 }
 
 // GetAccountBySolanaWallet retrieves an account by its Solana wallet address
 func (db *DB) GetAccountBySolanaWallet(ctx context.Context, solanaAddress string) (*Account, error) {
-	account := &Account{}
-	err := db.QueryRow(ctx, `
-		SELECT id, account_number, evm_wallet_address, solana_wallet_address, balance_usdc, status,
-		       wallet_escrow_enabled, totp_enabled,
-		       created_at, updated_at, last_login_at, metadata
-		FROM accounts
-		WHERE solana_wallet_address = $1
-	`, solanaAddress).Scan(
-		&account.ID, &account.AccountNumber, &account.EVMWalletAddress, &account.SolanaWalletAddress,
-		&account.BalanceUSDC, &account.Status,
-		&account.WalletEscrow, &account.TOTPEnabled,
-		&account.CreatedAt,
-		&account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
-	)
-
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("account not found")
-		}
-		return nil, fmt.Errorf("failed to get account: %w", err)
-	}
-
-	return account, nil
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE solana_wallet_address = $1`, solanaAddress))
 }
 
 // UpdateAccount updates an account's fields

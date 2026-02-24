@@ -87,6 +87,12 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 	switch event.Type {
 	case "crypto.onramp_session.updated":
 		return h.handleOnrampSessionUpdated(c, event.Data.Object)
+	case "checkout.session.completed":
+		return h.handleCheckoutSessionCompleted(c, event.Data.Object)
+	case "invoice.paid":
+		return h.handleInvoicePaid(c, event.Data.Object)
+	case "invoice.payment_failed":
+		return h.handleInvoicePaymentFailed(c, event.Data.Object)
 	default:
 		// Return 200 for unhandled events to prevent Stripe retries
 		slog.Debug("unhandled stripe webhook event", "type", event.Type)
@@ -216,4 +222,116 @@ func (h *StripeWebhookHandler) handleOnrampSessionUpdated(c fiber.Ctx, obj map[s
 			"status":   "ignored",
 		})
 	}
+}
+
+// handleCheckoutSessionCompleted processes checkout.session.completed events (B2B credit purchases)
+func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c fiber.Ctx, obj map[string]interface{}) error {
+	sessionID, _ := obj["id"].(string)
+	paymentStatus, _ := obj["payment_status"].(string)
+
+	var depositID string
+	if metadata, ok := obj["metadata"].(map[string]interface{}); ok {
+		depositID, _ = metadata["deposit_id"].(string)
+	}
+
+	slog.Info("processing checkout session completed",
+		"session_id", sessionID,
+		"payment_status", paymentStatus,
+		"deposit_id", depositID,
+	)
+
+	if paymentStatus != "paid" {
+		slog.Info("checkout session not paid, ignoring", "session_id", sessionID, "status", paymentStatus)
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"received": true,
+			"status":   "ignored",
+		})
+	}
+
+	if depositID == "" {
+		slog.Warn("checkout session missing deposit_id in metadata", "session_id", sessionID)
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"received": true,
+			"warning":  "missing deposit_id in metadata",
+		})
+	}
+
+	parsedDepositID, err := uuid.Parse(depositID)
+	if err != nil {
+		slog.Error("invalid deposit_id in checkout metadata", "deposit_id", depositID, "error", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid deposit_id format",
+		})
+	}
+
+	ctx := c.Context()
+
+	// Check deposit status (idempotency)
+	deposit, err := h.db.GetDepositByID(ctx, parsedDepositID)
+	if err != nil {
+		slog.Error("failed to get deposit for checkout", "deposit_id", parsedDepositID, "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to get deposit",
+		})
+	}
+
+	if deposit.Status == db.DepositStatusCompleted {
+		slog.Info("deposit already completed, skipping", "deposit_id", parsedDepositID)
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"received": true,
+			"status":   "already_completed",
+		})
+	}
+
+	// Complete the deposit (credits the account balance via DB trigger)
+	if err := h.db.CompleteDeposit(ctx, parsedDepositID); err != nil {
+		slog.Error("failed to complete checkout deposit", "deposit_id", parsedDepositID, "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to complete deposit",
+		})
+	}
+
+	slog.Info("B2B credit purchase completed",
+		"deposit_id", parsedDepositID,
+		"session_id", sessionID,
+	)
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"received": true,
+		"status":   "completed",
+	})
+}
+
+// handleInvoicePaid processes invoice.paid events (metered billing invoices)
+func (h *StripeWebhookHandler) handleInvoicePaid(c fiber.Ctx, obj map[string]interface{}) error {
+	invoiceID, _ := obj["id"].(string)
+	customerID, _ := obj["customer"].(string)
+
+	slog.Info("metered invoice paid",
+		"invoice_id", invoiceID,
+		"customer_id", customerID,
+	)
+
+	// No balance change needed - usage was already served when metered
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"received": true,
+		"status":   "logged",
+	})
+}
+
+// handleInvoicePaymentFailed processes invoice.payment_failed events
+func (h *StripeWebhookHandler) handleInvoicePaymentFailed(c fiber.Ctx, obj map[string]interface{}) error {
+	invoiceID, _ := obj["id"].(string)
+	customerID, _ := obj["customer"].(string)
+
+	slog.Warn("metered invoice payment failed",
+		"invoice_id", invoiceID,
+		"customer_id", customerID,
+	)
+
+	// V1: log only. V2 could suspend B2B account after repeated failures.
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"received": true,
+		"status":   "logged",
+	})
 }

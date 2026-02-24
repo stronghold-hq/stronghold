@@ -16,7 +16,7 @@ External content -> [PROXY scans] -> Agent -> [API scans] -> Output
 **Proxy**: Scans INCOMING content, blocks prompt injection before agent sees it
 **API**: Scans OUTGOING content, catches credential leaks in agent responses
 
-Both require an account with USDC balance. $0.001 per scan.
+Both require payment. B2C users pay $0.001 per scan via x402 crypto. B2B users authenticate with API keys and pay via prepaid credits or metered billing.
 
 **Note on USDC amounts**: Canonical money fields are string-encoded microUSDC
 integers (1 microUSDC = 0.000001 USDC). For example, `"1000"` = $0.001,
@@ -234,6 +234,59 @@ Payment networks: Base (EVM) and Solana. Both use USDC.
 
 Check balance: `stronghold account balance`
 Add funds: `stronghold account deposit`
+
+---
+
+## B2B / API Key Access (Business Accounts)
+
+For server-to-server integration, Stronghold supports B2B accounts with email/password
+auth, API keys, and traditional card billing via Stripe.
+
+### Quick Start
+
+1. **Register**: `POST /v1/auth/b2b/register` with `{email, password, company_name}`
+2. **Login**: `POST /v1/auth/b2b/login` with `{email, password}`
+3. **Create API key**: `POST /v1/api-keys` (JWT auth required) → returns `sk_live_...`
+4. **Make requests**: `Authorization: Bearer sk_live_...` on scan endpoints
+
+### Authentication
+
+API key (`sk_live_...`) for scan endpoints. JWT (httpOnly cookie) for dashboard/management.
+
+### Billing
+
+Two payment methods, used in order:
+1. **Prepaid credits**: Purchase via Stripe Checkout (`POST /v1/billing/credits`)
+2. **Metered overflow**: When credits run out, usage is metered and billed monthly via Stripe
+
+### Scan Endpoint Usage
+
+```bash
+# With API key (B2B)
+curl -X POST https://api.getstronghold.xyz/v1/scan/content \
+  -H "Authorization: Bearer sk_live_abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "content to scan"}'
+
+# With x402 crypto payment (B2C - unchanged)
+curl -X POST https://api.getstronghold.xyz/v1/scan/content \
+  -H "X-PAYMENT: <x402-payment-header>" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "content to scan"}'
+```
+
+### B2B API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| /v1/auth/b2b/register | POST | none | Create B2B account |
+| /v1/auth/b2b/login | POST | none | Login with email/password |
+| /v1/api-keys | POST | JWT | Create API key |
+| /v1/api-keys | GET | JWT | List API keys |
+| /v1/api-keys/:id | DELETE | JWT | Revoke API key |
+| /v1/billing/credits | POST | JWT | Purchase credits (Stripe Checkout) |
+| /v1/billing/info | GET | JWT | Get billing info |
+| /v1/billing/portal | POST | JWT | Create Stripe billing portal session |
 
 ---
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"stronghold/internal/billing"
 	"stronghold/internal/config"
 	"stronghold/internal/db"
 	"stronghold/internal/handlers"
@@ -200,17 +201,34 @@ func (s *Server) setupRoutes() {
 	// Auth handlers with stricter rate limiting
 	s.authHandler.RegisterRoutesWithMiddleware(s.app, rateLimiter.AuthLimiter())
 
+	// B2B auth handlers (register/login) with rate limiting
+	b2bAuthHandler := handlers.NewB2BAuthHandler(s.database, s.authHandler, &s.config.Stripe)
+	b2bAuthHandler.RegisterRoutes(s.app, rateLimiter.AuthLimiter())
+
 	// Account handlers (no payment required for account management)
 	// Reuse authConfig from authHandler initialization
 	accountHandler := handlers.NewAccountHandler(s.database, s.authHandler.Config(), &s.config.Stripe)
 	accountHandler.RegisterRoutes(s.app, s.authHandler)
 
+	// API key management (JWT auth required)
+	apiKeyHandler := handlers.NewAPIKeyHandler(s.database)
+	apiKeyHandler.RegisterRoutes(s.app, s.authHandler.AuthMiddleware())
+
+	// B2B billing (JWT auth required)
+	billingHandler := handlers.NewB2BBillingHandler(s.database, &s.config.Stripe, s.config.Dashboard.URL)
+	billingHandler.RegisterRoutes(s.app, s.authHandler.AuthMiddleware())
+
 	// Stripe webhook handler (no auth required - verified via signature)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(s.database, &s.config.Stripe)
 	s.app.Post("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
 
-	// Scan handlers (payment required - now uses AtomicPayment for atomic settlement)
-	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, s.database, &s.config.Pricing)
+	// Initialize payment router (x402 + API key billing)
+	apiKeyMiddleware := middleware.NewAPIKeyMiddleware(s.database)
+	meterReporter := billing.NewMeterReporter(s.database, &s.config.Stripe)
+	paymentRouter := middleware.NewPaymentRouter(x402, apiKeyMiddleware, meterReporter, s.database)
+
+	// Scan handlers (payment required - uses PaymentRouter for x402 OR API key auth)
+	scanHandler := handlers.NewScanHandlerWithPaymentRouter(s.scanner, x402, s.database, &s.config.Pricing, paymentRouter)
 	scanHandler.RegisterRoutes(s.app)
 
 	// API documentation

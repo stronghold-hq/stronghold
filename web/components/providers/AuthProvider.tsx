@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { API_URL } from '@/lib/api';
+import { API_URL, b2bLogin as b2bLoginAPI, b2bRegister as b2bRegisterAPI } from '@/lib/api';
 
 interface Account {
   id: string;
@@ -12,6 +12,10 @@ interface Account {
   status: string;
   created_at: string;
   last_login_at?: string;
+  account_type?: 'b2c' | 'b2b';
+  email?: string;
+  company_name?: string;
+  stripe_customer_id?: string;
 }
 
 interface AuthContextType {
@@ -25,6 +29,8 @@ interface AuthContextType {
   resetTotp: () => void;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<boolean>;
+  b2bLogin: (email: string, password: string) => Promise<void>;
+  b2bRegister: (email: string, password: string, companyName: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -187,6 +193,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const b2bLoginHandler = async (email: string, password: string) => {
+    setIsLoading(true);
+    try {
+      await b2bLoginAPI(email, password);
+      await checkAuth();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const b2bRegisterHandler = async (email: string, password: string, companyName: string) => {
+    setIsLoading(true);
+    try {
+      await b2bRegisterAPI(email, password, companyName);
+      await checkAuth();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await fetch(`${API_URL}/v1/auth/logout`, {
@@ -218,6 +244,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         resetTotp,
         logout,
         refreshAuth,
+        b2bLogin: b2bLoginHandler,
+        b2bRegister: b2bRegisterHandler,
       }}
     >
       {children}

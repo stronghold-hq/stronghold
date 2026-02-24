@@ -1,0 +1,93 @@
+package billing
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"stronghold/internal/config"
+	"stronghold/internal/db"
+	"stronghold/internal/usdc"
+
+	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/billing/meterevent"
+)
+
+// MeterReporter reports B2B API usage to Stripe's Meter API
+type MeterReporter struct {
+	db           *db.DB
+	stripeConfig *config.StripeConfig
+}
+
+// NewMeterReporter creates a new meter reporter
+func NewMeterReporter(database *db.DB, stripeConfig *config.StripeConfig) *MeterReporter {
+	return &MeterReporter{
+		db:           database,
+		stripeConfig: stripeConfig,
+	}
+}
+
+// ReportUsage reports a metered API usage event to Stripe and records it locally
+func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, endpoint string, amountMicroUSDC usdc.MicroUSDC) error {
+	if m.stripeConfig.SecretKey == "" || m.stripeConfig.MeterID == "" {
+		slog.Warn("Stripe metering not configured, skipping usage report",
+			"account_id", accountID,
+			"endpoint", endpoint,
+		)
+		return nil
+	}
+
+	stripe.Key = m.stripeConfig.SecretKey
+
+	// Convert microUSDC to cents for Stripe (1 USDC = 100 cents, 1 microUSDC = 0.0001 cents)
+	// Stripe meters work with integer values, so we report in microUSDC units
+	// and configure the Stripe meter/price to interpret them correctly
+	valueInCents := amountMicroUSDC / 10000 // 1000 microUSDC = $0.001 = 0.1 cents
+	if valueInCents < 1 {
+		valueInCents = 1 // minimum 1 unit
+	}
+
+	params := &stripe.BillingMeterEventParams{
+		EventName: stripe.String("api_usage"),
+		Payload: map[string]string{
+			"stripe_customer_id": stripeCustomerID,
+			"value":              fmt.Sprintf("%d", valueInCents),
+		},
+		Timestamp: stripe.Int64(time.Now().Unix()),
+	}
+
+	event, err := meterevent.New(params)
+
+	var meterEventID *string
+	if err != nil {
+		slog.Error("failed to report usage to Stripe meter",
+			"account_id", accountID,
+			"endpoint", endpoint,
+			"error", err,
+		)
+		// Don't fail the request - record locally and retry later
+	} else if event != nil {
+		meterEventID = &event.Identifier
+	}
+
+	// Record locally regardless of Stripe API result
+	record := &db.StripeUsageRecord{
+		AccountID:          accountID,
+		StripeMeterEventID: meterEventID,
+		Endpoint:           endpoint,
+		AmountUSDC:         amountMicroUSDC,
+	}
+
+	if _, err := m.db.CreateStripeUsageRecord(ctx, record); err != nil {
+		slog.Error("failed to record stripe usage locally",
+			"account_id", accountID,
+			"endpoint", endpoint,
+			"error", err,
+		)
+		return fmt.Errorf("failed to record usage: %w", err)
+	}
+
+	return nil
+}
