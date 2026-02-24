@@ -61,18 +61,19 @@ func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, st
 	event, err := meterevent.New(params)
 
 	var meterEventID *string
+	var stripeErr error
 	if err != nil {
+		stripeErr = fmt.Errorf("stripe meter event failed: %w", err)
 		slog.Error("failed to report usage to Stripe meter",
 			"account_id", accountID,
 			"endpoint", endpoint,
 			"error", err,
 		)
-		// Don't fail the request - record locally and retry later
 	} else if event != nil {
 		meterEventID = &event.Identifier
 	}
 
-	// Record locally regardless of Stripe API result
+	// Record locally regardless of Stripe API result (for audit/reconciliation)
 	record := &db.StripeUsageRecord{
 		AccountID:          accountID,
 		StripeMeterEventID: meterEventID,
@@ -89,5 +90,6 @@ func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, st
 		return fmt.Errorf("failed to record usage: %w", err)
 	}
 
-	return nil
+	// Propagate Stripe submission failure so the caller knows metering didn't succeed
+	return stripeErr
 }

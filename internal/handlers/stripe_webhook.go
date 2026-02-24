@@ -89,6 +89,8 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		return h.handleOnrampSessionUpdated(c, event.Data.Object)
 	case "checkout.session.completed":
 		return h.handleCheckoutSessionCompleted(c, event.Data.Object)
+	case "checkout.session.expired":
+		return h.handleCheckoutSessionExpired(c, event.Data.Object)
 	case "invoice.paid":
 		return h.handleInvoicePaid(c, event.Data.Object)
 	case "invoice.payment_failed":
@@ -299,6 +301,49 @@ func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c fiber.Ctx, obj m
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"received": true,
 		"status":   "completed",
+	})
+}
+
+// handleCheckoutSessionExpired processes checkout.session.expired events.
+// When a user abandons a Stripe Checkout session, the pending deposit must be failed
+// to prevent orphan records in billing history.
+func (h *StripeWebhookHandler) handleCheckoutSessionExpired(c fiber.Ctx, obj map[string]interface{}) error {
+	sessionID, _ := obj["id"].(string)
+
+	var depositID string
+	if metadata, ok := obj["metadata"].(map[string]interface{}); ok {
+		depositID, _ = metadata["deposit_id"].(string)
+	}
+
+	slog.Info("checkout session expired", "session_id", sessionID, "deposit_id", depositID)
+
+	if depositID == "" {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"received": true,
+			"warning":  "missing deposit_id in metadata",
+		})
+	}
+
+	parsedDepositID, err := uuid.Parse(depositID)
+	if err != nil {
+		slog.Error("invalid deposit_id in expired checkout metadata", "deposit_id", depositID, "error", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid deposit_id format",
+		})
+	}
+
+	if err := h.db.FailDeposit(c.Context(), parsedDepositID, "checkout session expired"); err != nil {
+		slog.Error("failed to mark expired checkout deposit as failed",
+			"deposit_id", parsedDepositID, "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to update deposit status",
+		})
+	}
+
+	slog.Info("expired checkout deposit marked as failed", "deposit_id", parsedDepositID)
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"received": true,
+		"status":   "failed",
 	})
 }
 

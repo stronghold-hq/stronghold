@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -68,9 +69,11 @@ func (m *APIKeyMiddleware) Authenticate(c fiber.Ctx) (*db.Account, *db.APIKey, e
 	c.Locals("account_id", account.ID.String())
 	c.Locals("api_key_id", apiKey.ID.String())
 
-	// Async update last_used_at
+	// Async update last_used_at (use background context since Fiber's
+	// request context is recycled after the handler returns)
+	keyID := apiKey.ID
 	go func() {
-		if err := m.db.UpdateAPIKeyLastUsed(c.Context(), apiKey.ID); err != nil {
+		if err := m.db.UpdateAPIKeyLastUsed(context.Background(), keyID); err != nil {
 			slog.Debug("failed to update API key last_used_at", "error", err)
 		}
 	}()

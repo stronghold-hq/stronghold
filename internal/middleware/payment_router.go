@@ -113,17 +113,16 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	// Fall back to metered billing
 	if hasMetered && pr.meter != nil {
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price); err != nil {
+			slog.Error("metered billing failed", "account_id", account.ID, "error", err)
+			c.Response().Reset()
 			if errors.Is(err, billing.ErrMeteringNotConfigured) {
-				// Metering config is permanently missing — cannot bill
-				slog.Error("metered billing unavailable: stripe metering not configured",
-					"account_id", account.ID)
-				c.Response().Reset()
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Billing configuration error",
 				})
 			}
-			// Transient Stripe error — usage recorded locally for reconciliation
-			slog.Error("failed to report metered usage", "account_id", account.ID, "error", err)
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error": "Billing service temporarily unavailable. Please try again.",
+			})
 		}
 		pr.logUsage(c, account.ID, price, "metered")
 		return nil
