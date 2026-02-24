@@ -49,13 +49,22 @@ func (m *APIKeyMiddleware) Authenticate(c fiber.Ctx) (*db.Account, *db.APIKey, e
 	// Look up key
 	apiKey, err := m.db.GetAPIKeyByHash(c.Context(), keyHash)
 	if err != nil {
-		return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Invalid API key")
+		// Distinguish not-found (invalid key) from infrastructure errors (DB down)
+		if strings.Contains(err.Error(), "not found") {
+			return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Invalid API key")
+		}
+		slog.Error("API key lookup failed", "error", err)
+		return nil, nil, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
 	}
 
 	// Load associated account
 	account, err := m.db.GetAccountByID(c.Context(), apiKey.AccountID)
 	if err != nil {
-		return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Account not found")
+		if strings.Contains(err.Error(), "not found") {
+			return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Account not found")
+		}
+		slog.Error("account lookup failed for API key", "account_id", apiKey.AccountID, "error", err)
+		return nil, nil, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
 	}
 
 	// Verify account is B2B and active

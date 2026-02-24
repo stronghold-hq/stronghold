@@ -237,11 +237,18 @@ func (h *B2BAuthHandler) Login(c fiber.Ctx) error {
 	// Lookup account by email
 	account, err := h.db.GetAccountByEmail(ctx, req.Email)
 	if err != nil {
-		// Run a dummy bcrypt compare to equalize timing with the valid-email path,
-		// preventing email enumeration via response latency differences.
-		auth.CheckPassword(dummyBcryptHash, req.Password)
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid email or password",
+		// Distinguish not-found (unknown email) from infrastructure errors (DB down).
+		// Not-found → 401 with dummy bcrypt to equalize timing.
+		// DB error → 500 so clients can retry and monitors can alert.
+		if strings.Contains(err.Error(), "not found") {
+			auth.CheckPassword(dummyBcryptHash, req.Password)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Invalid email or password",
+			})
+		}
+		slog.Error("failed to look up account by email", "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
 		})
 	}
 
