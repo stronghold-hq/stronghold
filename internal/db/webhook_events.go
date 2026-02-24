@@ -5,24 +5,32 @@ import (
 	"fmt"
 )
 
-// CheckAndRecordWebhookEvent atomically checks if a webhook event has been processed
-// and records it if not. Returns true if the event was already processed (duplicate).
-func (db *DB) CheckAndRecordWebhookEvent(ctx context.Context, eventID, eventType string) (bool, error) {
-	// Use INSERT ... ON CONFLICT DO NOTHING and check rows affected.
-	// If 0 rows affected, the event already exists (duplicate).
-	query := `
+// IsWebhookEventProcessed checks whether a webhook event has already been
+// successfully processed. This is a read-only check — the event is not recorded.
+func (db *DB) IsWebhookEventProcessed(ctx context.Context, eventID string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM processed_webhook_events WHERE event_id = $1)`,
+		eventID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check webhook event: %w", err)
+	}
+	return exists, nil
+}
+
+// RecordWebhookEvent marks a webhook event as successfully processed.
+// Uses ON CONFLICT DO NOTHING so concurrent calls are safe.
+func (db *DB) RecordWebhookEvent(ctx context.Context, eventID, eventType string) error {
+	_, err := db.pool.Exec(ctx, `
 		INSERT INTO processed_webhook_events (event_id, event_type)
 		VALUES ($1, $2)
 		ON CONFLICT (event_id) DO NOTHING
-	`
-
-	result, err := db.pool.Exec(ctx, query, eventID, eventType)
+	`, eventID, eventType)
 	if err != nil {
-		return false, fmt.Errorf("failed to check/record webhook event: %w", err)
+		return fmt.Errorf("failed to record webhook event: %w", err)
 	}
-
-	// If no rows were inserted, the event was already processed
-	return result.RowsAffected() == 0, nil
+	return nil
 }
 
 // CleanupOldWebhookEvents removes processed webhook events older than the given number of days

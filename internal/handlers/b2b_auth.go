@@ -10,6 +10,7 @@ import (
 	"stronghold/internal/auth"
 	"stronghold/internal/config"
 	"stronghold/internal/db"
+	"stronghold/internal/usdc"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/stripe/stripe-go/v82"
@@ -202,7 +203,7 @@ type B2BLoginResponse struct {
 	Email       string    `json:"email"`
 	CompanyName string    `json:"company_name"`
 	AccountType string    `json:"account_type"`
-	BalanceUSDC int64     `json:"balance_usdc"`
+	BalanceUSDC usdc.MicroUSDC `json:"balance_usdc"`
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
@@ -297,7 +298,7 @@ func (h *B2BAuthHandler) Login(c fiber.Ctx) error {
 		Email:       req.Email,
 		CompanyName: companyName,
 		AccountType: db.AccountTypeB2B,
-		BalanceUSDC: int64(account.BalanceUSDC),
+		BalanceUSDC: account.BalanceUSDC,
 		ExpiresAt:   expiresAt,
 	})
 }

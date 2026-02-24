@@ -66,11 +66,10 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 
 	slog.Info("stripe webhook received", "type", event.Type, "id", event.ID)
 
-	// Check event ID idempotency - reject duplicates
-	alreadyProcessed, err := h.db.CheckAndRecordWebhookEvent(c.Context(), event.ID, string(event.Type))
+	// Check event ID idempotency - reject duplicates (read-only check)
+	alreadyProcessed, err := h.db.IsWebhookEventProcessed(c.Context(), event.ID)
 	if err != nil {
 		slog.Error("failed to check webhook event idempotency", "event_id", event.ID, "error", err)
-		// Return 500 to trigger Stripe retry
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Internal error",
 		})
@@ -83,25 +82,44 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		})
 	}
 
-	// Route to event-specific handlers
+	// Route to event-specific handlers.
+	// The handler writes its own response; we record the event only on success
+	// so that Stripe retries can reprocess on transient failures.
+	var handlerErr error
+	handled := true
 	switch event.Type {
 	case "crypto.onramp_session.updated":
-		return h.handleOnrampSessionUpdated(c, event.Data.Object)
+		handlerErr = h.handleOnrampSessionUpdated(c, event.Data.Object)
 	case "checkout.session.completed":
-		return h.handleCheckoutSessionCompleted(c, event.Data.Object)
+		handlerErr = h.handleCheckoutSessionCompleted(c, event.Data.Object)
 	case "checkout.session.expired":
-		return h.handleCheckoutSessionExpired(c, event.Data.Object)
+		handlerErr = h.handleCheckoutSessionExpired(c, event.Data.Object)
 	case "invoice.paid":
-		return h.handleInvoicePaid(c, event.Data.Object)
+		handlerErr = h.handleInvoicePaid(c, event.Data.Object)
 	case "invoice.payment_failed":
-		return h.handleInvoicePaymentFailed(c, event.Data.Object)
+		handlerErr = h.handleInvoicePaymentFailed(c, event.Data.Object)
 	default:
-		// Return 200 for unhandled events to prevent Stripe retries
+		handled = false
 		slog.Debug("unhandled stripe webhook event", "type", event.Type)
+	}
+
+	if handlerErr != nil {
+		return handlerErr
+	}
+
+	// Mark event as processed after the handler succeeds. If the handler
+	// returned an error (above), we skip this so Stripe retries can reprocess.
+	if err := h.db.RecordWebhookEvent(c.Context(), event.ID, string(event.Type)); err != nil {
+		slog.Error("failed to record webhook event as processed", "event_id", event.ID, "error", err)
+	}
+
+	if !handled {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"received": true,
 		})
 	}
+
+	return nil
 }
 
 // handleOnrampSessionUpdated processes crypto.onramp_session.updated events

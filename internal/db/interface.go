@@ -46,7 +46,7 @@ type Database interface {
 	UpdateWalletAddresses(ctx context.Context, accountID uuid.UUID, evmAddr *string, solanaAddr *string) error
 
 	// API key operations
-	CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, keyHash, name string) (*APIKey, error)
+	CreateAPIKey(ctx context.Context, accountID uuid.UUID, keyPrefix, keyHash, name string, maxKeys int) (*APIKey, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
 	ListAPIKeys(ctx context.Context, accountID uuid.UUID) ([]APIKey, error)
 	RevokeAPIKey(ctx context.Context, keyID, accountID uuid.UUID) error
@@ -108,7 +108,8 @@ type Database interface {
 	LinkUsageLog(ctx context.Context, usageLogID, paymentTxID uuid.UUID) error
 
 	// Webhook event idempotency
-	CheckAndRecordWebhookEvent(ctx context.Context, eventID, eventType string) (bool, error)
+	IsWebhookEventProcessed(ctx context.Context, eventID string) (bool, error)
+	RecordWebhookEvent(ctx context.Context, eventID, eventType string) error
 }
 
 // Ensure DB implements Database interface
