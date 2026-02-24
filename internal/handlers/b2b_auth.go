@@ -167,9 +167,11 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	userAgent := string(c.Request().Header.UserAgent())
 	_, refreshToken, err := h.db.CreateSession(ctx, account.ID, net.ParseIP(ip), userAgent, h.authHandler.config.RefreshTokenTTL)
 	if err != nil {
-		slog.Error("failed to create session", "error", err)
+		slog.Error("failed to create session, rolling back account",
+			"account_id", account.ID, "error", err)
+		h.db.DeleteAccount(ctx, account.ID)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to create session",
+			"error": "Failed to create account. Please try again.",
 		})
 	}
 

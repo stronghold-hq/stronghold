@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
@@ -242,7 +243,11 @@ func (h *B2BBillingHandler) getB2BAccountID(c fiber.Ctx) (uuid.UUID, error) {
 	// Verify B2B
 	account, err := h.db.GetAccountByID(c.Context(), accountID)
 	if err != nil {
-		return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
+		if strings.Contains(err.Error(), "not found") {
+			return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
+		}
+		slog.Error("failed to look up account for billing", "account_id", accountID, "error", err)
+		return uuid.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
 	}
 	if account.AccountType != db.AccountTypeB2B {
 		return uuid.UUID{}, fiber.NewError(fiber.StatusForbidden, "Billing is only available for business accounts")
