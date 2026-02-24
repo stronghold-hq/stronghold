@@ -66,15 +66,17 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 
 	slog.Info("stripe webhook received", "type", event.Type, "id", event.ID)
 
-	// Check event ID idempotency - reject duplicates (read-only check)
-	alreadyProcessed, err := h.db.IsWebhookEventProcessed(c.Context(), event.ID)
+	// Atomically claim the event to prevent concurrent deliveries from both
+	// running handlers. Exactly one caller wins the INSERT; losers see
+	// claimed=false and return early as duplicates.
+	claimed, err := h.db.ClaimWebhookEvent(c.Context(), event.ID, string(event.Type))
 	if err != nil {
-		slog.Error("failed to check webhook event idempotency", "event_id", event.ID, "error", err)
+		slog.Error("failed to claim webhook event", "event_id", event.ID, "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Internal error",
 		})
 	}
-	if alreadyProcessed {
+	if !claimed {
 		slog.Info("duplicate stripe webhook event, skipping", "event_id", event.ID)
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"received":  true,
@@ -83,8 +85,7 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 	}
 
 	// Route to event-specific handlers.
-	// The handler writes its own response; we record the event only on success
-	// so that Stripe retries can reprocess on transient failures.
+	// On failure, unclaim the event so Stripe retries can reprocess it.
 	var handlerErr error
 	handled := true
 	switch event.Type {
@@ -103,18 +104,18 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		slog.Debug("unhandled stripe webhook event", "type", event.Type)
 	}
 
+	// If the handler returned a Go error or wrote a non-2xx status, unclaim
+	// the event so Stripe retries can reprocess it. Handlers signal failure
+	// via c.Status(4xx/5xx).JSON(...) which returns nil, so handlerErr alone
+	// is not sufficient — we must also check the response status code.
 	if handlerErr != nil {
+		h.unclaimEvent(c, event.ID)
 		return handlerErr
 	}
-
-	// Mark event as processed only when the handler wrote a 2xx response.
-	// Handlers signal failure via c.Status(4xx/5xx).JSON(...) which returns nil,
-	// so handlerErr alone is not sufficient — we must also check the status code
-	// to avoid marking failed events as processed (which would block Stripe retries).
-	status := c.Response().StatusCode()
-	if handled && status >= 200 && status < 300 {
-		if err := h.db.RecordWebhookEvent(c.Context(), event.ID, string(event.Type)); err != nil {
-			slog.Error("failed to record webhook event as processed", "event_id", event.ID, "error", err)
+	if handled {
+		status := c.Response().StatusCode()
+		if status < 200 || status >= 300 {
+			h.unclaimEvent(c, event.ID)
 		}
 	}
 
@@ -125,6 +126,13 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 	}
 
 	return nil
+}
+
+// unclaimEvent removes the webhook event claim so Stripe retries can reprocess it.
+func (h *StripeWebhookHandler) unclaimEvent(c fiber.Ctx, eventID string) {
+	if err := h.db.UnclaimWebhookEvent(c.Context(), eventID); err != nil {
+		slog.Error("failed to unclaim webhook event", "event_id", eventID, "error", err)
+	}
 }
 
 // handleOnrampSessionUpdated processes crypto.onramp_session.updated events

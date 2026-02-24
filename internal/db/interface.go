@@ -108,8 +108,8 @@ type Database interface {
 	LinkUsageLog(ctx context.Context, usageLogID, paymentTxID uuid.UUID) error
 
 	// Webhook event idempotency
-	IsWebhookEventProcessed(ctx context.Context, eventID string) (bool, error)
-	RecordWebhookEvent(ctx context.Context, eventID, eventType string) error
+	ClaimWebhookEvent(ctx context.Context, eventID, eventType string) (bool, error)
+	UnclaimWebhookEvent(ctx context.Context, eventID string) error
 }
 
 // Ensure DB implements Database interface

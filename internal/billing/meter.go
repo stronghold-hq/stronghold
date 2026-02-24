@@ -33,6 +33,13 @@ func NewMeterReporter(database *db.DB, stripeConfig *config.StripeConfig) *Meter
 	}
 }
 
+// IsConfigured returns whether Stripe metering is fully configured and ready
+// to accept usage reports. Callers should check this before running billable
+// work to avoid executing requests that cannot be billed.
+func (m *MeterReporter) IsConfigured() bool {
+	return m.stripeConfig.SecretKey != "" && m.stripeConfig.MeterEventName != ""
+}
+
 // ReportUsage reports a metered API usage event to Stripe and records it locally.
 // A server-generated UUID is used as the Stripe meter event identifier so that
 // clients cannot reuse request IDs to collapse distinct calls into one billing event.

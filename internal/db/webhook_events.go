@@ -5,30 +5,31 @@ import (
 	"fmt"
 )
 
-// IsWebhookEventProcessed checks whether a webhook event has already been
-// successfully processed. This is a read-only check — the event is not recorded.
-func (db *DB) IsWebhookEventProcessed(ctx context.Context, eventID string) (bool, error) {
-	var exists bool
-	err := db.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM processed_webhook_events WHERE event_id = $1)`,
-		eventID,
-	).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("failed to check webhook event: %w", err)
-	}
-	return exists, nil
-}
-
-// RecordWebhookEvent marks a webhook event as successfully processed.
-// Uses ON CONFLICT DO NOTHING so concurrent calls are safe.
-func (db *DB) RecordWebhookEvent(ctx context.Context, eventID, eventType string) error {
-	_, err := db.pool.Exec(ctx, `
+// ClaimWebhookEvent atomically claims a webhook event for processing.
+// Returns true if the event was claimed (first arrival), false if already
+// claimed by a concurrent delivery. Uses INSERT ON CONFLICT DO NOTHING so
+// exactly one concurrent caller wins the claim.
+func (db *DB) ClaimWebhookEvent(ctx context.Context, eventID, eventType string) (bool, error) {
+	result, err := db.pool.Exec(ctx, `
 		INSERT INTO processed_webhook_events (event_id, event_type)
 		VALUES ($1, $2)
 		ON CONFLICT (event_id) DO NOTHING
 	`, eventID, eventType)
 	if err != nil {
-		return fmt.Errorf("failed to record webhook event: %w", err)
+		return false, fmt.Errorf("failed to claim webhook event: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// UnclaimWebhookEvent removes a previously claimed webhook event, allowing
+// Stripe retries to reprocess it. Called when the handler fails so that
+// the event is not permanently marked as processed.
+func (db *DB) UnclaimWebhookEvent(ctx context.Context, eventID string) error {
+	_, err := db.pool.Exec(ctx, `
+		DELETE FROM processed_webhook_events WHERE event_id = $1
+	`, eventID)
+	if err != nil {
+		return fmt.Errorf("failed to unclaim webhook event: %w", err)
 	}
 	return nil
 }

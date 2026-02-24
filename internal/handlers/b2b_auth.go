@@ -19,6 +19,15 @@ import (
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
+// dummyBcryptHash is a pre-computed bcrypt hash used on login failure paths
+// to normalize response timing and prevent email enumeration. Running a real
+// bcrypt compare (~200-300ms at cost 12) instead of a fixed sleep makes the
+// unknown-email path indistinguishable from the wrong-password path.
+var dummyBcryptHash = func() string {
+	h, _ := auth.HashPassword("timing-equalization-dummy")
+	return h
+}()
+
 // B2BAuthHandler handles B2B registration and login
 type B2BAuthHandler struct {
 	db           *db.DB
@@ -228,8 +237,9 @@ func (h *B2BAuthHandler) Login(c fiber.Ctx) error {
 	// Lookup account by email
 	account, err := h.db.GetAccountByEmail(ctx, req.Email)
 	if err != nil {
-		// Constant time to prevent timing attacks
-		time.Sleep(100 * time.Millisecond)
+		// Run a dummy bcrypt compare to equalize timing with the valid-email path,
+		// preventing email enumeration via response latency differences.
+		auth.CheckPassword(dummyBcryptHash, req.Password)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid email or password",
 		})
@@ -237,7 +247,7 @@ func (h *B2BAuthHandler) Login(c fiber.Ctx) error {
 
 	// Verify password
 	if account.PasswordHash == nil {
-		time.Sleep(100 * time.Millisecond)
+		auth.CheckPassword(dummyBcryptHash, req.Password)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid email or password",
 		})

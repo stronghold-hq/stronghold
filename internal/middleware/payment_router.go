@@ -75,7 +75,7 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 
 	// Pre-check: verify the account has a way to pay before running the handler
 	hasCredits := account.BalanceUSDC >= price
-	hasMetered := pr.meter != nil && account.StripeCustomerID != nil && *account.StripeCustomerID != ""
+	hasMetered := pr.meter != nil && pr.meter.IsConfigured() && account.StripeCustomerID != nil && *account.StripeCustomerID != ""
 
 	if !hasCredits && !hasMetered {
 		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
