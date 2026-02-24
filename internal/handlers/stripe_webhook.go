@@ -104,17 +104,16 @@ func (h *StripeWebhookHandler) HandleWebhook(c fiber.Ctx) error {
 		slog.Debug("unhandled stripe webhook event", "type", event.Type)
 	}
 
-	// If the handler returned a Go error or wrote a non-2xx status, unclaim
-	// the event so Stripe retries can reprocess it. Handlers signal failure
-	// via c.Status(4xx/5xx).JSON(...) which returns nil, so handlerErr alone
-	// is not sufficient — we must also check the response status code.
+	// Unclaim only on retryable failures (Go errors or 5xx status).
+	// 4xx responses indicate permanently invalid payloads that won't succeed
+	// on retry — keep those claimed to prevent noisy retry loops.
 	if handlerErr != nil {
 		h.unclaimEvent(c, event.ID)
 		return handlerErr
 	}
 	if handled {
 		status := c.Response().StatusCode()
-		if status < 200 || status >= 300 {
+		if status >= 500 {
 			h.unclaimEvent(c, event.ID)
 		}
 	}
