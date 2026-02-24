@@ -265,7 +265,7 @@ If you choose to upload your wallet to the server, **TOTP is required**.
 ## Links
 
 - Documentation: https://github.com/yv-was-taken/stronghold
-- Human Docs: https://docs.stronghold.xyz
+- Human Docs: https://docs.getstronghold.xyz
 - API Spec: https://api.getstronghold.xyz/docs
 - Dashboard: https://getstronghold.xyz/dashboard
 - Full Reference: https://getstronghold.xyz/llms-full.txt
