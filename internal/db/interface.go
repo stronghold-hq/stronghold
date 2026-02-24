@@ -92,6 +92,17 @@ type Database interface {
 
 	// Webhook event idempotency
 	CheckAndRecordWebhookEvent(ctx context.Context, eventID, eventType string) (bool, error)
+
+	// API key operations
+	CreateAPIKey(ctx context.Context, accountID uuid.UUID, label string) (*APIKey, string, error)
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
+	ListAPIKeys(ctx context.Context, accountID uuid.UUID) ([]*APIKey, error)
+	RevokeAPIKey(ctx context.Context, accountID uuid.UUID, keyID uuid.UUID) error
+	HasActiveAPIKeys(ctx context.Context, accountID uuid.UUID) (bool, error)
+
+	// Account settings
+	GetJailbreakDetectionEnabled(ctx context.Context, accountID uuid.UUID, defaultValue bool) (bool, error)
+	SetJailbreakDetectionEnabled(ctx context.Context, accountID uuid.UUID, enabled bool) error
 }
 
 // Ensure DB implements Database interface

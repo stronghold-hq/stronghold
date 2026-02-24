@@ -160,7 +160,7 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(cors.New(cors.Config{
 		AllowOrigins:     s.config.Dashboard.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization", "X-Stronghold-Device", middleware.RequestIDHeader},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-PAYMENT", "X-PAYMENT-RESPONSE", "Authorization", "X-API-Key", "X-Stronghold-Device", middleware.RequestIDHeader},
 		ExposeHeaders:    []string{"X-PAYMENT-RESPONSE", middleware.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -209,9 +209,20 @@ func (s *Server) setupRoutes() {
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(s.database, &s.config.Stripe)
 	s.app.Post("/webhooks/stripe", stripeWebhookHandler.HandleWebhook)
 
-	// Scan handlers (payment required - now uses AtomicPayment for atomic settlement)
-	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, s.database, &s.config.Pricing)
+	// Initialize API key middleware for B2B authentication
+	apiKeyAuth := middleware.NewAPIKeyMiddleware(s.database)
+
+	// Scan handlers (dual auth: x402 payment for B2C, API key for B2B)
+	scanHandler := handlers.NewScanHandlerWithDB(s.scanner, x402, apiKeyAuth, s.database, &s.config.Pricing)
 	scanHandler.RegisterRoutes(s.app)
+
+	// API key management handlers (session auth required)
+	apiKeyHandler := handlers.NewAPIKeyHandler(s.database)
+	apiKeyHandler.RegisterRoutes(s.app, s.authHandler)
+
+	// Account settings handlers (session auth required)
+	settingsHandler := handlers.NewSettingsHandler(s.database)
+	settingsHandler.RegisterRoutes(s.app, s.authHandler)
 
 	// API documentation
 	docsHandler := handlers.NewDocsHandler()

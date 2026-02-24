@@ -7,25 +7,29 @@ import (
 	"stronghold/internal/db"
 	"stronghold/internal/middleware"
 	"stronghold/internal/stronghold"
+	"stronghold/internal/usdc"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 )
 
 // ScanHandler handles scan-related endpoints
 type ScanHandler struct {
-	scanner *stronghold.Scanner
-	x402    *middleware.X402Middleware
-	db      *db.DB
-	pricing *config.PricingConfig
+	scanner    *stronghold.Scanner
+	x402       *middleware.X402Middleware
+	apiKeyAuth *middleware.APIKeyMiddleware
+	db         *db.DB
+	pricing    *config.PricingConfig
 }
 
 // NewScanHandlerWithDB creates a new scan handler with database support
-func NewScanHandlerWithDB(scanner *stronghold.Scanner, x402 *middleware.X402Middleware, database *db.DB, pricing *config.PricingConfig) *ScanHandler {
+func NewScanHandlerWithDB(scanner *stronghold.Scanner, x402 *middleware.X402Middleware, apiKeyAuth *middleware.APIKeyMiddleware, database *db.DB, pricing *config.PricingConfig) *ScanHandler {
 	return &ScanHandler{
-		scanner: scanner,
-		x402:    x402,
-		db:      database,
-		pricing: pricing,
+		scanner:    scanner,
+		x402:       x402,
+		apiKeyAuth: apiKeyAuth,
+		db:         database,
+		pricing:    pricing,
 	}
 }
 
@@ -41,6 +45,19 @@ type ScanContentRequest struct {
 // ScanOutputRequest represents a request to scan LLM/agent output for credential leaks
 type ScanOutputRequest struct {
 	Text string `json:"text"`
+}
+
+// dualAuth returns middleware that authenticates via API key (B2B) or x402 payment (B2C).
+// If X-API-Key header is present, API key auth is used; otherwise x402 payment is required.
+func (h *ScanHandler) dualAuth(price usdc.MicroUSDC) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if c.Get("X-API-Key") != "" {
+			// B2B path: authenticate via API key
+			return h.apiKeyAuth.Authenticate()(c)
+		}
+		// B2C path: require x402 payment
+		return h.x402.AtomicPayment(price)(c)
+	}
 }
 
 // RegisterRoutes registers all scan routes
@@ -61,10 +78,10 @@ func (h *ScanHandler) RegisterRoutes(app *fiber.App) {
 	group := app.Group("/v1/scan")
 
 	// Content scanning - detect prompt injection in external content
-	group.Post("/content", h.x402.AtomicPayment(h.pricing.ScanContent), h.ScanContent)
+	group.Post("/content", h.dualAuth(h.pricing.ScanContent), h.ScanContent)
 
 	// Output scanning - detect credential leaks in LLM responses
-	group.Post("/output", h.x402.AtomicPayment(h.pricing.ScanOutput), h.ScanOutput)
+	group.Post("/output", h.dualAuth(h.pricing.ScanOutput), h.ScanOutput)
 }
 
 // ScanContent handles content scanning for prompt injection
@@ -124,8 +141,14 @@ func (h *ScanHandler) ScanContent(c fiber.Ctx) error {
 
 	result.RequestID = requestID
 
+	// Filter jailbreak threats based on auth method and settings
+	h.filterJailbreakThreats(c, result)
+
 	// Record execution result in payment transaction for idempotent replay
 	h.recordExecutionResult(c, result)
+
+	// Log usage for B2B requests (x402 handles its own logging)
+	h.logB2BUsage(c, result, "/v1/scan/content", h.pricing.ScanContent)
 
 	return c.JSON(result)
 }
@@ -181,7 +204,109 @@ func (h *ScanHandler) ScanOutput(c fiber.Ctx) error {
 	// Record execution result in payment transaction for idempotent replay
 	h.recordExecutionResult(c, result)
 
+	// Log usage for B2B requests
+	h.logB2BUsage(c, result, "/v1/scan/output", h.pricing.ScanOutput)
+
 	return c.JSON(result)
+}
+
+// filterJailbreakThreats removes jailbreak threats from results based on auth method and settings.
+// B2C (x402): always filters out jailbreak threats.
+// B2B (API key): filters only if jailbreak detection is explicitly disabled in settings.
+func (h *ScanHandler) filterJailbreakThreats(c fiber.Ctx, result *stronghold.ScanResult) {
+	authMethod, _ := c.Locals("auth_method").(string)
+
+	shouldFilter := false
+
+	if authMethod == "api_key" {
+		// B2B: check account settings (default: enabled)
+		accountIDStr, _ := c.Locals("account_id").(string)
+		if accountIDStr != "" {
+			accountID, err := uuid.Parse(accountIDStr)
+			if err == nil {
+				enabled, err := h.db.GetJailbreakDetectionEnabled(c.Context(), accountID, true)
+				if err != nil {
+					slog.Warn("failed to get jailbreak detection setting, defaulting to enabled",
+						"account_id", accountIDStr, "error", err)
+					enabled = true
+				}
+				shouldFilter = !enabled
+			}
+		}
+	} else {
+		// B2C (x402 path): always filter jailbreak threats
+		shouldFilter = true
+	}
+
+	if !shouldFilter {
+		return
+	}
+
+	// Remove jailbreak-category threats
+	filtered := make([]stronghold.Threat, 0, len(result.ThreatsFound))
+	for _, t := range result.ThreatsFound {
+		if t.Category != "jailbreak" {
+			filtered = append(filtered, t)
+		}
+	}
+	result.ThreatsFound = filtered
+
+	// If no threats remain and decision was BLOCK/WARN, reset to ALLOW
+	if len(result.ThreatsFound) == 0 && result.Decision != stronghold.DecisionAllow {
+		result.Decision = stronghold.DecisionAllow
+		result.RecommendedAction = "allow"
+		result.Reason = "No actionable threats detected"
+	}
+}
+
+// logB2BUsage creates a usage log entry for B2B (API key) requests.
+// x402 payment requests already have their own logging via the payment transaction.
+func (h *ScanHandler) logB2BUsage(c fiber.Ctx, result *stronghold.ScanResult, endpoint string, cost usdc.MicroUSDC) {
+	authMethod, _ := c.Locals("auth_method").(string)
+	if authMethod != "api_key" {
+		return
+	}
+
+	accountIDStr, _ := c.Locals("account_id").(string)
+	if accountIDStr == "" {
+		return
+	}
+
+	accountID, err := uuid.Parse(accountIDStr)
+	if err != nil {
+		return
+	}
+
+	threatDetected := len(result.ThreatsFound) > 0
+	var threatType *string
+	if threatDetected && len(result.ThreatsFound) > 0 {
+		t := result.ThreatsFound[0].Category
+		threatType = &t
+	}
+
+	latency := int(result.LatencyMs)
+	usageLog := &db.UsageLog{
+		AccountID:      accountID,
+		RequestID:      result.RequestID,
+		Endpoint:       endpoint,
+		Method:         "POST",
+		CostUSDC:       cost,
+		Status:         "success",
+		ThreatDetected: threatDetected,
+		ThreatType:     threatType,
+		LatencyMs:      &latency,
+		Metadata: map[string]any{
+			"auth_method": "api_key",
+		},
+	}
+
+	if err := h.db.CreateUsageLog(c.Context(), usageLog); err != nil {
+		slog.Error("failed to log B2B usage",
+			"account_id", accountIDStr,
+			"request_id", result.RequestID,
+			"error", err,
+		)
+	}
 }
 
 // recordExecutionResult stores the scan result in the payment transaction for idempotent replay

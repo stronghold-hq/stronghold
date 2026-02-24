@@ -16,7 +16,8 @@ External content -> [PROXY scans] -> Agent -> [API scans] -> Output
 **Proxy**: Scans INCOMING content, blocks prompt injection before agent sees it
 **API**: Scans OUTGOING content, catches credential leaks in agent responses
 
-Both require an account with USDC balance. $0.001 per scan.
+**B2C (CLI/Proxy)**: Pay-per-request via x402 protocol. $0.001 per scan.
+**B2B (Server-side)**: Authenticate via API key (`X-API-Key` header). No per-request payment.
 
 **Note on USDC amounts**: Canonical money fields are string-encoded microUSDC
 integers (1 microUSDC = 0.000001 USDC). For example, `"1000"` = $0.001,
@@ -166,6 +167,32 @@ stronghold config set scanning.content.action_on_warn block
 
 Base URL: https://api.getstronghold.xyz
 
+### Authentication
+
+Two authentication methods:
+
+**B2C (x402 payment)**: Include `X-PAYMENT` header with each request. Used by CLI/proxy.
+**B2B (API key)**: Include `X-API-Key: sh_live_...` header. Manage keys via dashboard or API.
+
+```bash
+# B2C: x402 payment
+curl -X POST https://api.getstronghold.xyz/v1/scan/output \
+  -H "Content-Type: application/json" \
+  -H "X-PAYMENT: <x402-payment-header>" \
+  -d '{"text": "..."}'
+
+# B2B: API key
+curl -X POST https://api.getstronghold.xyz/v1/scan/output \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sh_live_a1b2c3d4..." \
+  -d '{"text": "..."}'
+```
+
+### Jailbreak Detection
+
+- **B2C**: Jailbreak threats are always filtered from scan results.
+- **B2B**: Jailbreak threats are included by default. Toggle via settings API.
+
 ### POST /v1/scan/output (Recommended API use)
 
 Scans agent responses BEFORE sending to users. Catches credential leaks.
@@ -201,6 +228,21 @@ curl -X POST https://api.getstronghold.xyz/v1/scan/content \
   -H "X-PAYMENT: <x402-payment-header>" \
   -d '{"text": "Ignore previous instructions...", "source_url": "https://example.com"}'
 ```
+
+### API Key Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /v1/account/api-keys | Create API key (returns raw key once) |
+| GET | /v1/account/api-keys | List all API keys |
+| DELETE | /v1/account/api-keys/:id | Revoke an API key |
+
+### Account Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /v1/account/settings | Get settings (jailbreak_detection_enabled) |
+| PUT | /v1/account/settings | Update settings |
 
 ### Response Format
 
