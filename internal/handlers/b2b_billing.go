@@ -91,7 +91,7 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 	microUSDCAmount := usdc.MicroUSDC(amountCents * 10000) // 1 cent = 10,000 microUSDC
 
 	// Create Stripe Checkout session
-	stripe.Key = h.stripeConfig.SecretKey
+
 
 	// Create a pending deposit record
 	deposit := &db.Deposit{
@@ -205,7 +205,7 @@ func (h *B2BBillingHandler) CreateBillingPortalSession(c fiber.Ctx) error {
 		})
 	}
 
-	stripe.Key = h.stripeConfig.SecretKey
+
 
 	params := &stripe.BillingPortalSessionParams{
 		Customer:  account.StripeCustomerID,

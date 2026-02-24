@@ -16,6 +16,7 @@ import (
 	"stronghold/internal/stronghold"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/stripe/stripe-go/v82"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -200,6 +201,12 @@ func (s *Server) setupRoutes() {
 
 	// Auth handlers with stricter rate limiting
 	s.authHandler.RegisterRoutesWithMiddleware(s.app, rateLimiter.AuthLimiter())
+
+	// Initialize Stripe API key once — all handlers share the same key.
+	// Setting it per-request would be an unsynchronized write to a package global.
+	if s.config.Stripe.SecretKey != "" {
+		stripe.Key = s.config.Stripe.SecretKey
+	}
 
 	// B2B auth handlers (register/login) with rate limiting
 	b2bAuthHandler := handlers.NewB2BAuthHandler(s.database, s.authHandler, &s.config.Stripe)

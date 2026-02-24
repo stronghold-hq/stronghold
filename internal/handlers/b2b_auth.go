@@ -126,7 +126,6 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 			"error": "Failed to create account",
 		})
 	}
-	stripe.Key = h.stripeConfig.SecretKey
 	params := &stripe.CustomerParams{
 		Email: stripe.String(req.Email),
 		Name:  stripe.String(req.CompanyName),

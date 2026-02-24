@@ -34,14 +34,12 @@ func NewMeterReporter(database *db.DB, stripeConfig *config.StripeConfig) *Meter
 }
 
 // ReportUsage reports a metered API usage event to Stripe and records it locally.
-// The requestID is used as the Stripe meter event identifier for idempotency —
-// retries with the same requestID collapse to a single billing event.
-func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, requestID, endpoint string, amountMicroUSDC usdc.MicroUSDC) error {
+// A server-generated UUID is used as the Stripe meter event identifier so that
+// clients cannot reuse request IDs to collapse distinct calls into one billing event.
+func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, endpoint string, amountMicroUSDC usdc.MicroUSDC) error {
 	if m.stripeConfig.SecretKey == "" || m.stripeConfig.MeterEventName == "" {
 		return ErrMeteringNotConfigured
 	}
-
-	stripe.Key = m.stripeConfig.SecretKey
 
 	// Report raw microUSDC as the meter value to preserve sub-cent pricing
 	// precision. The Stripe meter price must be configured to interpret
@@ -49,7 +47,7 @@ func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, st
 	// truncate all sub-cent prices (e.g. $0.001) to the same value.
 	params := &stripe.BillingMeterEventParams{
 		EventName:  stripe.String(m.stripeConfig.MeterEventName),
-		Identifier: stripe.String(requestID),
+		Identifier: stripe.String(uuid.New().String()),
 		Payload: map[string]string{
 			"stripe_customer_id": stripeCustomerID,
 			"value":              fmt.Sprintf("%d", amountMicroUSDC),
