@@ -41,11 +41,10 @@ func (m *MeterReporter) IsConfigured() bool {
 }
 
 // ReportUsage reports a metered API usage event to Stripe and records it locally.
-// The caller must supply an idempotencyKey that is stable across retries of the
-// same logical billing event. This key becomes the Stripe meter event Identifier,
-// so Stripe deduplicates if the same event is reported twice (e.g. after a
-// transport error where the first call actually succeeded).
-func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, endpoint string, amountMicroUSDC usdc.MicroUSDC, idempotencyKey string) error {
+// The caller supplies a unique eventID (typically uuid.New()) for each billable
+// event. Every call creates a distinct Stripe meter event — no deduplication is
+// intended because the scan handler runs on every request, including retries.
+func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, stripeCustomerID, endpoint string, amountMicroUSDC usdc.MicroUSDC, eventID string) error {
 	if m.stripeConfig.SecretKey == "" || m.stripeConfig.MeterEventName == "" {
 		return ErrMeteringNotConfigured
 	}
@@ -56,7 +55,7 @@ func (m *MeterReporter) ReportUsage(ctx context.Context, accountID uuid.UUID, st
 	// truncate all sub-cent prices (e.g. $0.001) to the same value.
 	params := &stripe.BillingMeterEventParams{
 		EventName:  stripe.String(m.stripeConfig.MeterEventName),
-		Identifier: stripe.String(idempotencyKey),
+		Identifier: stripe.String(eventID),
 		Payload: map[string]string{
 			"stripe_customer_id": stripeCustomerID,
 			"value":              fmt.Sprintf("%d", amountMicroUSDC),

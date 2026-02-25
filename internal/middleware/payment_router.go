@@ -111,9 +111,9 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	}
 
 	// Fall back to metered billing.
-	// Each billable event gets a server-issued unique identifier so clients
-	// cannot influence Stripe meter deduplication. Retry safety is the client's
-	// responsibility (use Idempotency-Key at the HTTP layer).
+	// Each request gets a unique server-issued identifier. No deduplication is
+	// intended — the scan runs on every request (including retries), so each
+	// execution is a distinct billable event.
 	if hasMetered {
 		meterKey := uuid.New().String()
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price, meterKey); err != nil {
