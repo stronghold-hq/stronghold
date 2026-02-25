@@ -186,8 +186,14 @@ func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
 	}
 
 	if err := h.db.RevokeAPIKey(c.Context(), keyID, accountID); err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "API key not found or already revoked",
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "API key not found or already revoked",
+			})
+		}
+		slog.Error("failed to revoke API key", "account_id", accountID, "key_id", keyID, "error", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to revoke API key",
 		})
 	}
 
