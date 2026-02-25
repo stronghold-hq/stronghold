@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"strings"
@@ -111,10 +113,13 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	}
 
 	// Fall back to metered billing.
-	// Generate the idempotency key once so the same Stripe meter identifier is
-	// used if this billing event is retried after a transport error.
+	// Derive the Stripe meter identifier from the client's Idempotency-Key if
+	// provided, so retries of the same logical request reuse the identifier and
+	// Stripe deduplicates. The raw client value is hashed with the account ID
+	// so clients cannot predict or reuse identifiers across different accounts
+	// or endpoints to evade billing. Without a client key, a fresh UUID is used.
 	if hasMetered {
-		meterKey := uuid.New().String()
+		meterKey := pr.meterIdempotencyKey(c, account.ID)
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price, meterKey); err != nil {
 			slog.Error("metered billing failed", "account_id", account.ID, "error", err)
 			c.Response().Reset()
@@ -139,6 +144,19 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 		"error":   "Payment failed",
 		"message": "Unable to process payment. Please try again.",
 	})
+}
+
+// meterIdempotencyKey returns a Stripe meter event identifier that is stable
+// across retries when the client provides an Idempotency-Key header. The raw
+// client value is hashed with the account ID and endpoint to prevent reuse
+// across different billing contexts. Without a client key, a fresh UUID is used.
+func (pr *PaymentRouter) meterIdempotencyKey(c fiber.Ctx, accountID uuid.UUID) string {
+	clientKey := c.Get("Idempotency-Key")
+	if clientKey == "" {
+		return uuid.New().String()
+	}
+	h := sha256.Sum256([]byte(clientKey + ":" + accountID.String() + ":" + c.Path()))
+	return hex.EncodeToString(h[:])
 }
 
 // logUsage creates a usage log entry for a B2B API request.

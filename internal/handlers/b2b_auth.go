@@ -147,7 +147,10 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	if err != nil {
 		slog.Error("failed to create Stripe customer, rolling back account",
 			"account_id", account.ID, "error", err)
-		h.db.DeleteAccount(ctx, account.ID)
+		if delErr := h.db.DeleteAccount(ctx, account.ID); delErr != nil {
+			slog.Error("failed to delete orphaned account after Stripe failure",
+				"account_id", account.ID, "error", delErr)
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to set up billing. Please try again.",
 		})
@@ -155,7 +158,10 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	if err := h.db.UpdateStripeCustomerID(ctx, account.ID, cust.ID); err != nil {
 		slog.Error("failed to store Stripe customer ID, rolling back account",
 			"account_id", account.ID, "error", err)
-		h.db.DeleteAccount(ctx, account.ID)
+		if delErr := h.db.DeleteAccount(ctx, account.ID); delErr != nil {
+			slog.Error("failed to delete orphaned account after Stripe ID update failure",
+				"account_id", account.ID, "error", delErr)
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to set up billing. Please try again.",
 		})
@@ -169,7 +175,10 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	if err != nil {
 		slog.Error("failed to create session, rolling back account",
 			"account_id", account.ID, "error", err)
-		h.db.DeleteAccount(ctx, account.ID)
+		if delErr := h.db.DeleteAccount(ctx, account.ID); delErr != nil {
+			slog.Error("failed to delete orphaned account after session creation failure",
+				"account_id", account.ID, "error", delErr)
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create account. Please try again.",
 		})
