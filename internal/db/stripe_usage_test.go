@@ -104,6 +104,4 @@ func TestGetStripeUsageRecords_Empty(t *testing.T) {
 	records, err := db.GetStripeUsageRecords(ctx, account.ID, 50, 0)
 	require.NoError(t, err)
 	assert.Empty(t, records)
-	// Verify it's not nil but an empty slice or nil slice (both are fine, just not an error)
-	assert.Len(t, records, 0)
 }

@@ -1,10 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
-	"strings"
 
 	"stronghold/internal/config"
 	"stronghold/internal/db"
@@ -48,7 +48,7 @@ type PurchaseCreditsRequest struct {
 
 // PurchaseCredits creates a Stripe Checkout session for credit purchase
 func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
-	accountID, err := h.getB2BAccountID(c)
+	account, err := h.getB2BAccount(c)
 	if err != nil {
 		return err
 	}
@@ -72,14 +72,6 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 		})
 	}
 
-	// Get account for Stripe customer ID
-	account, err := h.db.GetAccountByID(c.Context(), accountID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Account not found",
-		})
-	}
-
 	if account.StripeCustomerID == nil || *account.StripeCustomerID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "No Stripe customer linked to this account. Please contact support.",
@@ -96,7 +88,7 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 
 	// Create a pending deposit record
 	deposit := &db.Deposit{
-		AccountID:  accountID,
+		AccountID:  account.ID,
 		Provider:   db.DepositProviderStripe,
 		AmountUSDC: microUSDCAmount,
 		FeeUSDC:    0, // No fee for credit purchases
@@ -131,7 +123,7 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 		SuccessURL: stripe.String(h.dashboardURL + "/dashboard/main/billing?session_id={CHECKOUT_SESSION_ID}&status=success"),
 		CancelURL:  stripe.String(h.dashboardURL + "/dashboard/main/billing?status=cancelled"),
 	}
-	params.AddMetadata("account_id", accountID.String())
+	params.AddMetadata("account_id", account.ID.String())
 	params.AddMetadata("deposit_id", deposit.ID.String())
 	params.AddMetadata("amount_usdc_micro", fmt.Sprintf("%d", microUSDCAmount))
 
@@ -160,20 +152,13 @@ func (h *B2BBillingHandler) PurchaseCredits(c fiber.Ctx) error {
 
 // GetBillingInfo returns billing overview for the authenticated B2B account
 func (h *B2BBillingHandler) GetBillingInfo(c fiber.Ctx) error {
-	accountID, err := h.getB2BAccountID(c)
+	account, err := h.getB2BAccount(c)
 	if err != nil {
 		return err
 	}
 
-	account, err := h.db.GetAccountByID(c.Context(), accountID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Account not found",
-		})
-	}
-
 	// Get recent metered usage
-	usageRecords, err := h.db.GetStripeUsageRecords(c.Context(), accountID, 10, 0)
+	usageRecords, err := h.db.GetStripeUsageRecords(c.Context(), account.ID, 10, 0)
 	if err != nil {
 		slog.Error("failed to get usage records", "error", err)
 		usageRecords = nil
@@ -188,16 +173,9 @@ func (h *B2BBillingHandler) GetBillingInfo(c fiber.Ctx) error {
 
 // CreateBillingPortalSession creates a Stripe Billing Portal session
 func (h *B2BBillingHandler) CreateBillingPortalSession(c fiber.Ctx) error {
-	accountID, err := h.getB2BAccountID(c)
+	account, err := h.getB2BAccount(c)
 	if err != nil {
 		return err
-	}
-
-	account, err := h.db.GetAccountByID(c.Context(), accountID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Account not found",
-		})
 	}
 
 	if account.StripeCustomerID == nil || *account.StripeCustomerID == "" {
@@ -226,32 +204,33 @@ func (h *B2BBillingHandler) CreateBillingPortalSession(c fiber.Ctx) error {
 	})
 }
 
-// getB2BAccountID extracts account ID and verifies it's a B2B account.
+// getB2BAccount extracts the account ID from the JWT context, loads the
+// account, and verifies it is a B2B account. The loaded account is returned
+// so callers don't need a second GetAccountByID round-trip.
 // Returns fiber.NewError so the global error handler formats the response
 // and the caller stops execution (c.Status().JSON() returns nil, which
-// would let callers continue with uuid.Nil).
-func (h *B2BBillingHandler) getB2BAccountID(c fiber.Ctx) (uuid.UUID, error) {
+// would let callers continue with a nil account).
+func (h *B2BBillingHandler) getB2BAccount(c fiber.Ctx) (*db.Account, error) {
 	accountIDStr := c.Locals("account_id")
 	if accountIDStr == nil {
-		return uuid.UUID{}, fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+		return nil, fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 	accountID, err := uuid.Parse(accountIDStr.(string))
 	if err != nil {
-		return uuid.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Invalid account ID")
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Invalid account ID")
 	}
 
-	// Verify B2B
 	account, err := h.db.GetAccountByID(c.Context(), accountID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
+		if errors.Is(err, db.ErrAccountNotFound) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "Account not found")
 		}
 		slog.Error("failed to look up account for billing", "account_id", accountID, "error", err)
-		return uuid.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
 	}
 	if account.AccountType != db.AccountTypeB2B {
-		return uuid.UUID{}, fiber.NewError(fiber.StatusForbidden, "Billing is only available for business accounts")
+		return nil, fiber.NewError(fiber.StatusForbidden, "Billing is only available for business accounts")
 	}
 
-	return accountID, nil
+	return account, nil
 }

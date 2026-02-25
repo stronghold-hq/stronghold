@@ -62,7 +62,7 @@ export default function LoginPage() {
     }
 
     if (tab === 'business') {
-      if (!email.trim() || !password) {
+      if (!email.trim() || !password.trim()) {
         setError('Please enter your email and password');
         return;
       }
@@ -111,7 +111,7 @@ export default function LoginPage() {
     );
   }
 
-  const isB2BFormValid = email.trim().length > 0 && password.length > 0;
+  const isB2BFormValid = email.trim().length > 0 && password.trim().length > 0;
   const isB2CFormValid = accountNumber.length >= 19;
 
   return (
@@ -136,9 +136,11 @@ export default function LoginPage() {
 
           {/* Tab Toggle - only show when TOTP is not required */}
           {!totpRequired && (
-            <div className="flex bg-[#0a0a0a] rounded-lg p-1 mb-6">
+            <div role="tablist" className="flex bg-[#0a0a0a] rounded-lg p-1 mb-6">
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === 'personal'}
                 onClick={() => handleTabChange('personal')}
                 className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
                   tab === 'personal'
@@ -150,6 +152,8 @@ export default function LoginPage() {
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === 'business'}
                 onClick={() => handleTabChange('business')}
                 className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
                   tab === 'business'

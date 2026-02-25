@@ -173,7 +173,7 @@ func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
 	}
 
 	if err := h.db.RevokeAPIKey(c.Context(), keyID, accountID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, db.ErrAPIKeyNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "API key not found or already revoked",
 			})
@@ -203,7 +203,7 @@ func (h *APIKeyHandler) getB2BAccountID(c fiber.Ctx) (uuid.UUID, error) {
 	}
 	account, err := h.db.GetAccountByID(c.Context(), accountID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, db.ErrAccountNotFound) {
 			return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
 		}
 		slog.Error("failed to look up account for API key management", "account_id", accountID, "error", err)

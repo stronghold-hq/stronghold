@@ -11,6 +11,7 @@ import {
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { purchaseCredits, getBillingInfo, createBillingPortalSession } from '@/lib/api';
@@ -59,6 +60,7 @@ function BillingPageContent() {
 
   const loadBillingInfo = useCallback(async () => {
     setIsLoadingBilling(true);
+    setError('');
     try {
       const data = await getBillingInfo();
       setBillingInfo(data);
@@ -100,6 +102,8 @@ function BillingPageContent() {
       const result = await purchaseCredits(amountNum);
       if (result.checkout_url) {
         window.location.href = result.checkout_url;
+      } else {
+        setError('Purchase initiated but no checkout URL was returned. Please try again.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to initiate purchase');
@@ -115,6 +119,8 @@ function BillingPageContent() {
       const result = await createBillingPortalSession();
       if (result.portal_url) {
         window.location.href = result.portal_url;
+      } else {
+        setError('Could not open the billing portal. Please try again.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open billing portal');
@@ -132,12 +138,13 @@ function BillingPageContent() {
       {/* Header */}
       <header className="border-b border-[#222]">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-          <a
+          <Link
             href="/dashboard/main"
+            aria-label="Back to dashboard"
             className="p-2 text-gray-400 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
-          </a>
+          </Link>
           <h1 className="text-xl font-bold text-white">Billing</h1>
         </div>
       </header>

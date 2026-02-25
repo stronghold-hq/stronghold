@@ -43,6 +43,7 @@ var (
 	ErrInvalidEVMWalletAddress     = errors.New("invalid evm wallet address")
 	ErrInvalidSolanaWalletAddress  = errors.New("invalid solana wallet address")
 	ErrEmailAlreadyExists          = errors.New("email already registered")
+	ErrAccountNotFound             = errors.New("account not found")
 )
 
 // accountSelectColumns is the standard column list for account queries.
@@ -65,7 +66,7 @@ func scanAccount(row interface{ Scan(dest ...any) error }) (*Account, error) {
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("account not found")
+			return nil, ErrAccountNotFound
 		}
 		return nil, fmt.Errorf("failed to scan account: %w", err)
 	}
@@ -178,6 +179,9 @@ func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solan
 
 // CreateB2BAccount creates a new B2B account with email/password auth
 func (db *DB) CreateB2BAccount(ctx context.Context, email, passwordHash, companyName string) (*Account, error) {
+	if passwordHash == "" {
+		return nil, errors.New("password hash must not be empty")
+	}
 	account := &Account{
 		ID:           uuid.New(),
 		AccountType:  AccountTypeB2B,
@@ -236,6 +240,9 @@ func (db *DB) GetAccountByStripeCustomerID(ctx context.Context, customerID strin
 // DeductBalance atomically deducts from account balance. Returns true if deduction succeeded
 // (balance was sufficient), false if balance was insufficient.
 func (db *DB) DeductBalance(ctx context.Context, accountID uuid.UUID, amount usdc.MicroUSDC) (bool, error) {
+	if amount <= 0 {
+		return false, errors.New("amount must be positive")
+	}
 	result, err := db.pool.Exec(ctx, `
 		UPDATE accounts SET balance_usdc = balance_usdc - $1, updated_at = $2
 		WHERE id = $3 AND balance_usdc >= $1
@@ -421,9 +428,12 @@ func (db *DB) CloseAccount(ctx context.Context, accountID uuid.UUID) error {
 // DeleteAccount permanently deletes an account by ID.
 // Used only for rollback during registration when a subsequent step (e.g. Stripe customer creation) fails.
 func (db *DB) DeleteAccount(ctx context.Context, accountID uuid.UUID) error {
-	_, err := db.pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, accountID)
+	result, err := db.pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, accountID)
 	if err != nil {
 		return fmt.Errorf("failed to delete account: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrAccountNotFound
 	}
 	return nil
 }

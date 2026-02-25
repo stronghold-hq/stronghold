@@ -70,7 +70,7 @@ export default function B2BCreatePage() {
     email.trim().length > 0 &&
     companyName.trim().length > 0 &&
     password.length >= 8 &&
-    confirmPassword.length > 0;
+    confirmPassword === password;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-4">
@@ -166,6 +166,7 @@ export default function B2BCreatePage() {
 
             {error && (
               <motion.div
+                role="alert"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 className="flex items-center gap-2 text-red-400 text-sm"

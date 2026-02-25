@@ -814,7 +814,7 @@ billing relationship, and API keys. There is no conversion between account types
 # Register
 curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "dev@company.com", "password": "min-8-chars", "company_name": "Acme Corp"}'
+  -d '{"email": "dev@company.com", "password": "<your-password>", "company_name": "Acme Corp"}'
 
 # Response (201 Created)
 {
@@ -828,7 +828,7 @@ curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/register \
 # Login
 curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/login \
   -H "Content-Type: application/json" \
-  -d '{"email": "dev@company.com", "password": "min-8-chars"}'
+  -d '{"email": "dev@company.com", "password": "<your-password>"}'
 
 # Response (200 OK) — same shape as register, plus Set-Cookie
 ```
@@ -915,7 +915,9 @@ rejected. Instead, usage is reported to the Stripe Meter API in real time:
 5. Stripe aggregates metered usage and bills monthly via the account's payment method
 
 This ensures uninterrupted service. The B2B user sees metered charges on their
-next Stripe invoice.
+next Stripe invoice. Spending caps and low-balance alerts are not currently
+available. Metered usage is aggregated and billed at the end of each Stripe
+billing cycle.
 
 ### Billing Management
 
@@ -930,7 +932,7 @@ curl -s https://api.getstronghold.xyz/v1/billing/info \
   "credit_balance_usd": 50.00,
   "stripe_customer_id": "cus_...",
   "has_payment_method": true,
-  "metered_usage_current_period": 1250
+  "metered_usage_current_period": 1250  // microUSDC consumed in current billing cycle
 }
 
 # Open Stripe billing portal (manage payment methods, view invoices)

@@ -133,7 +133,7 @@ export default function DashboardPage() {
     );
   }
 
-  const isB2B = account.account_type === 'b2b';
+  const isB2B = account.account_type?.toLowerCase() === 'b2b';
 
   let balanceMicroUSDC = BigInt(0);
   try {
@@ -159,7 +159,7 @@ export default function DashboardPage() {
             <div className="text-right hidden sm:block">
               {isB2B ? (
                 <>
-                  <div className="text-sm text-gray-400">{account.company_name}</div>
+                  <div className="text-sm text-gray-400">{account.company_name ?? '\u2014'}</div>
                   <div className="text-white text-sm">{account.email}</div>
                 </>
               ) : (
@@ -436,7 +436,7 @@ export default function DashboardPage() {
               <>
                 <div>
                   <div className="text-gray-500 mb-1">Company</div>
-                  <div className="text-white">{account.company_name}</div>
+                  <div className="text-white">{account.company_name ?? '\u2014'}</div>
                 </div>
                 <div>
                   <div className="text-gray-500 mb-1">Email</div>

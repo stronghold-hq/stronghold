@@ -25,6 +25,9 @@ type APIKey struct {
 // ErrAPIKeyLimitReached is returned when the account has reached the maximum number of active API keys.
 var ErrAPIKeyLimitReached = errors.New("API key limit reached")
 
+// ErrAPIKeyNotFound is returned when the specified API key does not exist or is already revoked.
+var ErrAPIKeyNotFound = errors.New("API key not found or already revoked")
+
 // CreateAPIKey creates a new API key record, enforcing a maximum number of active
 // keys per account. The cap is checked atomically under a row lock on the account
 // to prevent concurrent requests from exceeding the limit.
@@ -88,7 +91,7 @@ func (db *DB) GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, err
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("API key not found")
+			return nil, ErrAPIKeyNotFound
 		}
 		return nil, fmt.Errorf("failed to get API key: %w", err)
 	}
@@ -140,7 +143,7 @@ func (db *DB) RevokeAPIKey(ctx context.Context, keyID, accountID uuid.UUID) erro
 	}
 
 	if result.RowsAffected() == 0 {
-		return errors.New("API key not found or already revoked")
+		return ErrAPIKeyNotFound
 	}
 
 	return nil

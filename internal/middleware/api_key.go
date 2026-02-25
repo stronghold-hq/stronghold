@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ func (m *APIKeyMiddleware) Authenticate(c fiber.Ctx) (*db.Account, *db.APIKey, e
 	apiKey, err := m.db.GetAPIKeyByHash(c.Context(), keyHash)
 	if err != nil {
 		// Distinguish not-found (invalid key) from infrastructure errors (DB down)
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, db.ErrAPIKeyNotFound) {
 			return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Invalid API key")
 		}
 		slog.Error("API key lookup failed", "error", err)
@@ -60,7 +61,7 @@ func (m *APIKeyMiddleware) Authenticate(c fiber.Ctx) (*db.Account, *db.APIKey, e
 	// Load associated account
 	account, err := m.db.GetAccountByID(c.Context(), apiKey.AccountID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, db.ErrAccountNotFound) {
 			return nil, nil, fiber.NewError(fiber.StatusUnauthorized, "Account not found")
 		}
 		slog.Error("account lookup failed for API key", "account_id", apiKey.AccountID, "error", err)
