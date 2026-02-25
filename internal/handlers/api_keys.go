@@ -51,22 +51,9 @@ type CreateAPIKeyResponse struct {
 
 // Create generates a new API key for the authenticated B2B account
 func (h *APIKeyHandler) Create(c fiber.Ctx) error {
-	accountID, err := h.getAccountID(c)
+	accountID, err := h.getB2BAccountID(c)
 	if err != nil {
 		return err
-	}
-
-	// Verify account is B2B
-	account, err := h.db.GetAccountByID(c.Context(), accountID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Account not found",
-		})
-	}
-	if account.AccountType != db.AccountTypeB2B {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "API keys are only available for business accounts",
-		})
 	}
 
 	// Parse request
@@ -136,9 +123,9 @@ type APIKeyListItem struct {
 	LastUsedAt *string `json:"last_used_at,omitempty"`
 }
 
-// List returns all active API keys for the authenticated account
+// List returns all active API keys for the authenticated B2B account
 func (h *APIKeyHandler) List(c fiber.Ctx) error {
-	accountID, err := h.getAccountID(c)
+	accountID, err := h.getB2BAccountID(c)
 	if err != nil {
 		return err
 	}
@@ -172,7 +159,7 @@ func (h *APIKeyHandler) List(c fiber.Ctx) error {
 
 // Revoke revokes an API key by ID
 func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
-	accountID, err := h.getAccountID(c)
+	accountID, err := h.getB2BAccountID(c)
 	if err != nil {
 		return err
 	}
@@ -205,6 +192,27 @@ func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "API key revoked",
 	})
+}
+
+// getB2BAccountID extracts the account ID and verifies it belongs to a B2B
+// account. All API key endpoints require B2B authorization.
+func (h *APIKeyHandler) getB2BAccountID(c fiber.Ctx) (uuid.UUID, error) {
+	accountID, err := h.getAccountID(c)
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+	account, err := h.db.GetAccountByID(c.Context(), accountID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return uuid.UUID{}, fiber.NewError(fiber.StatusNotFound, "Account not found")
+		}
+		slog.Error("failed to look up account for API key management", "account_id", accountID, "error", err)
+		return uuid.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
+	}
+	if account.AccountType != db.AccountTypeB2B {
+		return uuid.UUID{}, fiber.NewError(fiber.StatusForbidden, "API keys are only available for business accounts")
+	}
+	return accountID, nil
 }
 
 // getAccountID extracts and parses the account_id from request context.

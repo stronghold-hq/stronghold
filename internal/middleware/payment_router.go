@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"strings"
@@ -113,13 +111,11 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 	}
 
 	// Fall back to metered billing.
-	// Derive the Stripe meter identifier from the client's Idempotency-Key if
-	// provided, so retries of the same logical request reuse the identifier and
-	// Stripe deduplicates. The raw client value is hashed with the account ID
-	// so clients cannot predict or reuse identifiers across different accounts
-	// or endpoints to evade billing. Without a client key, a fresh UUID is used.
+	// Each billable event gets a server-issued unique identifier so clients
+	// cannot influence Stripe meter deduplication. Retry safety is the client's
+	// responsibility (use Idempotency-Key at the HTTP layer).
 	if hasMetered {
-		meterKey := pr.meterIdempotencyKey(c, account.ID)
+		meterKey := uuid.New().String()
 		if err := pr.meter.ReportUsage(c.Context(), account.ID, *account.StripeCustomerID, c.Path(), price, meterKey); err != nil {
 			slog.Error("metered billing failed", "account_id", account.ID, "error", err)
 			c.Response().Reset()
@@ -144,28 +140,6 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 		"error":   "Payment failed",
 		"message": "Unable to process payment. Please try again.",
 	})
-}
-
-// meterIdempotencyKey returns a Stripe meter event identifier. When the client
-// provides an Idempotency-Key header, it is hashed with the account ID,
-// endpoint, and request body to produce a stable identifier across retries.
-// Without a client key, a fresh UUID is used so every request is billed
-// independently (clients accept retry-related double-billing risk by omitting
-// the header).
-func (pr *PaymentRouter) meterIdempotencyKey(c fiber.Ctx, accountID uuid.UUID) string {
-	clientKey := c.Get("Idempotency-Key")
-	if clientKey == "" {
-		return uuid.New().String()
-	}
-	h := sha256.New()
-	h.Write([]byte(clientKey))
-	h.Write([]byte{':'})
-	h.Write([]byte(accountID.String()))
-	h.Write([]byte{':'})
-	h.Write([]byte(c.Path()))
-	h.Write([]byte{':'})
-	h.Write(c.Body())
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // logUsage creates a usage log entry for a B2B API request.
