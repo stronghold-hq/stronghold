@@ -147,16 +147,25 @@ func (pr *PaymentRouter) handleAPIKeyPayment(c fiber.Ctx, price usdc.MicroUSDC) 
 }
 
 // meterIdempotencyKey returns a Stripe meter event identifier that is stable
-// across retries when the client provides an Idempotency-Key header. The raw
-// client value is hashed with the account ID and endpoint to prevent reuse
-// across different billing contexts. Without a client key, a fresh UUID is used.
+// across retries of the same logical request. When the client provides an
+// Idempotency-Key header, it is hashed with the account ID, endpoint, and
+// request body. When absent, the identifier is derived from account + path +
+// body alone, providing best-effort deduplication for retries after transient
+// 503 errors. Clients should always send Idempotency-Key for precise control;
+// without it, two distinct requests with identical bodies to the same endpoint
+// will share an identifier within Stripe's deduplication window.
 func (pr *PaymentRouter) meterIdempotencyKey(c fiber.Ctx, accountID uuid.UUID) string {
-	clientKey := c.Get("Idempotency-Key")
-	if clientKey == "" {
-		return uuid.New().String()
+	h := sha256.New()
+	if clientKey := c.Get("Idempotency-Key"); clientKey != "" {
+		h.Write([]byte(clientKey))
+		h.Write([]byte{':'})
 	}
-	h := sha256.Sum256([]byte(clientKey + ":" + accountID.String() + ":" + c.Path()))
-	return hex.EncodeToString(h[:])
+	h.Write([]byte(accountID.String()))
+	h.Write([]byte{':'})
+	h.Write([]byte(c.Path()))
+	h.Write([]byte{':'})
+	h.Write(c.Body())
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // logUsage creates a usage log entry for a B2B API request.

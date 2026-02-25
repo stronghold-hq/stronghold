@@ -87,10 +87,15 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 		})
 	}
 
-	// Validate password
+	// Validate password (bcrypt silently truncates at 72 bytes; reject early)
 	if len(req.Password) < 8 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Password must be at least 8 characters",
+		})
+	}
+	if len(req.Password) > 72 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Password must be at most 72 bytes",
 		})
 	}
 
@@ -158,6 +163,10 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	if err := h.db.UpdateStripeCustomerID(ctx, account.ID, cust.ID); err != nil {
 		slog.Error("failed to store Stripe customer ID, rolling back account",
 			"account_id", account.ID, "error", err)
+		if _, delErr := customer.Del(cust.ID, nil); delErr != nil {
+			slog.Error("failed to delete Stripe customer during rollback",
+				"account_id", account.ID, "stripe_customer_id", cust.ID, "error", delErr)
+		}
 		if delErr := h.db.DeleteAccount(ctx, account.ID); delErr != nil {
 			slog.Error("failed to delete orphaned account after Stripe ID update failure",
 				"account_id", account.ID, "error", delErr)
@@ -175,6 +184,10 @@ func (h *B2BAuthHandler) Register(c fiber.Ctx) error {
 	if err != nil {
 		slog.Error("failed to create session, rolling back account",
 			"account_id", account.ID, "error", err)
+		if _, delErr := customer.Del(cust.ID, nil); delErr != nil {
+			slog.Error("failed to delete Stripe customer during rollback",
+				"account_id", account.ID, "stripe_customer_id", cust.ID, "error", delErr)
+		}
 		if delErr := h.db.DeleteAccount(ctx, account.ID); delErr != nil {
 			slog.Error("failed to delete orphaned account after session creation failure",
 				"account_id", account.ID, "error", delErr)
