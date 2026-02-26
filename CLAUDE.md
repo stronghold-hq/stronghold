@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **NEVER read, edit, or work in a different git worktree.** If a task, review, or file path references a different worktree than the current working directory, STOP immediately and tell the user. Do not explore, read files, or make changes in other worktrees — they are separate workspaces with their own context.
 - **NEVER commit directly to master.** Always create a feature branch and open a PR targeting master. Only commit to master if the user explicitly says to do so.
+- **NEVER merge PRs into master without explicit confirmation.** Merging to master means deploying to production. Even if the user says "merge both PRs", STOP and confirm before executing. Ask: "Are these ready for production? Should I merge now or wait until [deps/infra/tests] are verified?" This applies to `gh pr merge`, `git merge` into master, and any action that lands code on the production branch.
+- **After resolving merge conflicts, ALWAYS run `go vet ./...` and `bun run build` BEFORE staging/committing.** Textual conflict resolution frequently leaves behind signature mismatches, missing methods, and stale test code that only surface at compile time. Never trust that resolved conflicts are correct without verifying the build.
 - For commits that modify Go code (`*.go`, `go.mod`, `go.sum`), run `go test ./...` and verify all tests pass before committing.
 - For commits that modify frontend TypeScript (`web/**/*.ts`, `web/**/*.tsx`), run `cd web && bun run test` and verify tests pass before committing.
 - Docs-only changes (for example `*.md`) do not require running Go or frontend tests.
