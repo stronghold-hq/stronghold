@@ -50,7 +50,7 @@ var (
 const accountSelectColumns = `id, account_number, account_type, evm_wallet_address, solana_wallet_address,
        balance_usdc, status, wallet_escrow_enabled, totp_enabled,
        created_at, updated_at, last_login_at, metadata,
-       email, company_name, password_hash, stripe_customer_id`
+       email, company_name, workos_user_id, stripe_customer_id`
 
 // scanAccount scans a row into an Account struct matching accountSelectColumns.
 func scanAccount(row interface{ Scan(dest ...any) error }) (*Account, error) {
@@ -62,7 +62,7 @@ func scanAccount(row interface{ Scan(dest ...any) error }) (*Account, error) {
 		&account.BalanceUSDC, &account.Status,
 		&account.WalletEscrow, &account.TOTPEnabled,
 		&account.CreatedAt, &account.UpdatedAt, &account.LastLoginAt, &account.Metadata,
-		&account.Email, &account.CompanyName, &account.PasswordHash, &account.StripeCustomerID,
+		&account.Email, &account.CompanyName, &account.WorkOSUserID, &account.StripeCustomerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -94,7 +94,7 @@ type Account struct {
 	// B2B fields
 	Email            *string `json:"email,omitempty"`
 	CompanyName      *string `json:"company_name,omitempty"`
-	PasswordHash     *string `json:"-"`
+	WorkOSUserID     *string `json:"-"`
 	StripeCustomerID *string `json:"stripe_customer_id,omitempty"`
 	// Encrypted wallet key fields - never exposed via JSON
 	EncryptedPrivateKey *string    `json:"-"`
@@ -177,28 +177,31 @@ func (db *DB) CreateAccount(ctx context.Context, evmWalletAddress *string, solan
 	return account, nil
 }
 
-// CreateB2BAccount creates a new B2B account with email/password auth
-func (db *DB) CreateB2BAccount(ctx context.Context, email, passwordHash, companyName string) (*Account, error) {
-	if passwordHash == "" {
-		return nil, errors.New("password hash must not be empty")
+// CreateB2BAccount creates a new B2B account linked to a WorkOS user.
+// companyName may be empty — it gets collected during onboarding.
+func (db *DB) CreateB2BAccount(ctx context.Context, workosUserID, email, companyName string) (*Account, error) {
+	if workosUserID == "" {
+		return nil, errors.New("workos user ID must not be empty")
 	}
 	account := &Account{
 		ID:           uuid.New(),
 		AccountType:  AccountTypeB2B,
 		Email:        &email,
-		CompanyName:  &companyName,
-		PasswordHash: &passwordHash,
+		WorkOSUserID: &workosUserID,
 		BalanceUSDC:  0,
 		Status:       AccountStatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 		Metadata:     make(map[string]any),
 	}
+	if companyName != "" {
+		account.CompanyName = &companyName
+	}
 
 	_, err := db.pool.Exec(ctx, `
-		INSERT INTO accounts (id, account_type, email, company_name, password_hash, balance_usdc, status, created_at, updated_at, metadata)
+		INSERT INTO accounts (id, account_type, email, company_name, workos_user_id, balance_usdc, status, created_at, updated_at, metadata)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, account.ID, account.AccountType, account.Email, account.CompanyName, account.PasswordHash,
+	`, account.ID, account.AccountType, account.Email, account.CompanyName, account.WorkOSUserID,
 		account.BalanceUSDC, account.Status, account.CreatedAt, account.UpdatedAt, account.Metadata)
 
 	if err != nil {
@@ -206,6 +209,9 @@ func (db *DB) CreateB2BAccount(ctx context.Context, email, passwordHash, company
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			if strings.Contains(pgErr.ConstraintName, "email") {
 				return nil, ErrEmailAlreadyExists
+			}
+			if strings.Contains(pgErr.ConstraintName, "workos_user_id") {
+				return nil, errors.New("workos user already linked to an account")
 			}
 		}
 		return nil, fmt.Errorf("failed to create B2B account: %w", err)
@@ -218,6 +224,23 @@ func (db *DB) CreateB2BAccount(ctx context.Context, email, passwordHash, company
 func (db *DB) GetAccountByEmail(ctx context.Context, email string) (*Account, error) {
 	return scanAccount(db.QueryRow(ctx,
 		`SELECT `+accountSelectColumns+` FROM accounts WHERE email = $1`, email))
+}
+
+// GetAccountByWorkOSUserID retrieves a B2B account by WorkOS user ID
+func (db *DB) GetAccountByWorkOSUserID(ctx context.Context, workosUserID string) (*Account, error) {
+	return scanAccount(db.QueryRow(ctx,
+		`SELECT `+accountSelectColumns+` FROM accounts WHERE workos_user_id = $1`, workosUserID))
+}
+
+// UpdateCompanyName updates the company name for a B2B account
+func (db *DB) UpdateCompanyName(ctx context.Context, accountID uuid.UUID, companyName string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE accounts SET company_name = $1, updated_at = $2 WHERE id = $3
+	`, companyName, time.Now().UTC(), accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update company name: %w", err)
+	}
+	return nil
 }
 
 // UpdateStripeCustomerID updates the Stripe customer ID for an account

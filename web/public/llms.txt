@@ -239,19 +239,24 @@ Add funds: `stronghold account deposit`
 
 ## B2B / API Key Access (Business Accounts)
 
-For server-to-server integration, Stronghold supports B2B accounts with email/password
-auth, API keys, and traditional card billing via Stripe.
+For server-to-server integration, Stronghold supports B2B accounts with SSO
+authentication via WorkOS, API keys, and traditional card billing via Stripe.
 
 ### Quick Start
 
-1. **Register**: `POST /v1/auth/b2b/register` with `{email, password, company_name}`
-2. **Login**: `POST /v1/auth/b2b/login` with `{email, password}`
-3. **Create API key**: `POST /v1/api-keys` (JWT auth required) → returns `sk_live_...`
+1. **Sign in**: Visit the dashboard and click "Business" tab → "Sign in with SSO" (handled by WorkOS AuthKit)
+2. **Onboard**: Set your company name on first sign-in (`POST /v1/auth/b2b/onboard`)
+3. **Create API key**: `POST /v1/api-keys` (WorkOS JWT auth required) → returns `sk_live_...`
 4. **Make requests**: `Authorization: Bearer sk_live_...` on scan endpoints
 
 ### Authentication
 
-API key (`sk_live_...`) for scan endpoints. JWT (httpOnly cookie) for dashboard/management.
+**SSO (WorkOS AuthKit)** for dashboard login. WorkOS handles signup, login, password
+management, email verification, MFA, and social login. The backend validates WorkOS
+JWTs via JWKS and auto-provisions a local B2B account on first sign-in (JIT provisioning).
+
+**API keys** (`sk_live_...`) for scan endpoints. Created via the JWT-authenticated
+management endpoints in the dashboard.
 
 ### Billing
 
@@ -279,8 +284,7 @@ curl -X POST https://api.getstronghold.xyz/v1/scan/content \
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| /v1/auth/b2b/register | POST | none | Create B2B account |
-| /v1/auth/b2b/login | POST | none | Login with email/password |
+| /v1/auth/b2b/onboard | POST | WorkOS JWT | Set company name (first sign-in) |
 | /v1/api-keys | POST | JWT | Create API key |
 | /v1/api-keys | GET | JWT | List API keys |
 | /v1/api-keys/:id | DELETE | JWT | Revoke API key |

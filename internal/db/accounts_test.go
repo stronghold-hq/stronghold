@@ -538,11 +538,11 @@ func TestCreateB2BAccount(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
+	workosUserID := "user_01EXAMPLE"
 	email := "test@example.com"
-	passwordHash := "$2a$12$hashedpassword..."
 	companyName := "Test Company"
 
-	account, err := db.CreateB2BAccount(ctx, email, passwordHash, companyName)
+	account, err := db.CreateB2BAccount(ctx, workosUserID, email, companyName)
 	require.NoError(t, err)
 	require.NotNil(t, account)
 
@@ -557,9 +557,9 @@ func TestCreateB2BAccount(t *testing.T) {
 	require.NotNil(t, account.CompanyName)
 	assert.Equal(t, companyName, *account.CompanyName)
 
-	// Verify password hash is set
-	require.NotNil(t, account.PasswordHash)
-	assert.Equal(t, passwordHash, *account.PasswordHash)
+	// Verify WorkOS user ID is set
+	require.NotNil(t, account.WorkOSUserID)
+	assert.Equal(t, workosUserID, *account.WorkOSUserID)
 
 	// B2B accounts should not have an account_number
 	assert.Empty(t, account.AccountNumber)
@@ -581,6 +581,73 @@ func TestCreateB2BAccount(t *testing.T) {
 	assert.Equal(t, companyName, *found.CompanyName)
 }
 
+func TestCreateB2BAccount_EmptyCompanyName(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	account, err := db.CreateB2BAccount(ctx, "user_01NOCO", "noco@example.com", "")
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	assert.Nil(t, account.CompanyName, "empty company name should store as NULL")
+}
+
+func TestGetAccountByWorkOSUserID(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	workosUserID := "user_01LOOKUP"
+	email := "workos@example.com"
+
+	account, err := db.CreateB2BAccount(ctx, workosUserID, email, "WorkOS Co")
+	require.NoError(t, err)
+
+	found, err := db.GetAccountByWorkOSUserID(ctx, workosUserID)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, account.ID, found.ID)
+	assert.Equal(t, AccountTypeB2B, found.AccountType)
+	require.NotNil(t, found.WorkOSUserID)
+	assert.Equal(t, workosUserID, *found.WorkOSUserID)
+}
+
+func TestGetAccountByWorkOSUserID_NotFound(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	_, err := db.GetAccountByWorkOSUserID(ctx, "user_01NONEXISTENT")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+func TestUpdateCompanyName(t *testing.T) {
+	testDB := testutil.NewTestDB(t)
+	defer testDB.Close(t)
+
+	db := &DB{pool: testDB.Pool}
+	ctx := context.Background()
+
+	account, err := db.CreateB2BAccount(ctx, "user_01ONBOARD", "onboard@example.com", "")
+	require.NoError(t, err)
+	assert.Nil(t, account.CompanyName)
+
+	err = db.UpdateCompanyName(ctx, account.ID, "Acme Corp")
+	require.NoError(t, err)
+
+	found, err := db.GetAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found.CompanyName)
+	assert.Equal(t, "Acme Corp", *found.CompanyName)
+}
+
 func TestCreateB2BAccount_DuplicateEmail(t *testing.T) {
 	testDB := testutil.NewTestDB(t)
 	defer testDB.Close(t)
@@ -589,15 +656,13 @@ func TestCreateB2BAccount_DuplicateEmail(t *testing.T) {
 	ctx := context.Background()
 
 	email := "duplicate@example.com"
-	passwordHash := "$2a$12$hashedpassword..."
-	companyName := "Test Company"
 
 	// Create first account
-	_, err := db.CreateB2BAccount(ctx, email, passwordHash, companyName)
+	_, err := db.CreateB2BAccount(ctx, "user_01DUP1", email, "Test Company")
 	require.NoError(t, err)
 
 	// Attempt to create second account with same email
-	_, err = db.CreateB2BAccount(ctx, email, passwordHash, "Another Company")
+	_, err = db.CreateB2BAccount(ctx, "user_01DUP2", email, "Another Company")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrEmailAlreadyExists)
 }
@@ -610,10 +675,8 @@ func TestGetAccountByEmail(t *testing.T) {
 	ctx := context.Background()
 
 	email := "lookup@example.com"
-	passwordHash := "$2a$12$hashedpassword..."
-	companyName := "Test Company"
 
-	account, err := db.CreateB2BAccount(ctx, email, passwordHash, companyName)
+	account, err := db.CreateB2BAccount(ctx, "user_01EMAIL", email, "Test Company")
 	require.NoError(t, err)
 
 	// Lookup by email
@@ -646,7 +709,7 @@ func TestUpdateStripeCustomerID(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a B2B account
-	account, err := db.CreateB2BAccount(ctx, "stripe@example.com", "$2a$12$hashedpassword...", "Stripe Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01STRIPE", "stripe@example.com", "Stripe Co")
 	require.NoError(t, err)
 	assert.Nil(t, account.StripeCustomerID)
 
@@ -670,7 +733,7 @@ func TestGetAccountByStripeCustomerID(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a B2B account and set Stripe customer ID
-	account, err := db.CreateB2BAccount(ctx, "stripelookup@example.com", "$2a$12$hashedpassword...", "Stripe Lookup Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01SLOOKUP", "stripelookup@example.com", "Stripe Lookup Co")
 	require.NoError(t, err)
 
 	customerID := "cus_lookup789"
@@ -699,7 +762,7 @@ func TestDeductBalance(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a B2B account and fund it
-	account, err := db.CreateB2BAccount(ctx, "deduct@example.com", "$2a$12$hashedpassword...", "Deduct Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01DEDUCT", "deduct@example.com", "Deduct Co")
 	require.NoError(t, err)
 
 	err = db.UpdateBalance(ctx, account.ID, usdc.FromFloat(100.0))
@@ -734,7 +797,7 @@ func TestDeductBalance_InsufficientFunds(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a B2B account with limited funds
-	account, err := db.CreateB2BAccount(ctx, "insufficient@example.com", "$2a$12$hashedpassword...", "Broke Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01BROKE", "insufficient@example.com", "Broke Co")
 	require.NoError(t, err)
 
 	err = db.UpdateBalance(ctx, account.ID, usdc.FromFloat(10.0))

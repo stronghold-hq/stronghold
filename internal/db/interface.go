@@ -20,10 +20,12 @@ type Database interface {
 
 	// Account operations
 	CreateAccount(ctx context.Context, evmWalletAddress *string, solanaWalletAddress *string) (*Account, error)
-	CreateB2BAccount(ctx context.Context, email, passwordHash, companyName string) (*Account, error)
+	CreateB2BAccount(ctx context.Context, workosUserID, email, companyName string) (*Account, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (*Account, error)
 	GetAccountByNumber(ctx context.Context, accountNumber string) (*Account, error)
 	GetAccountByEmail(ctx context.Context, email string) (*Account, error)
+	GetAccountByWorkOSUserID(ctx context.Context, workosUserID string) (*Account, error)
+	UpdateCompanyName(ctx context.Context, accountID uuid.UUID, companyName string) error
 	GetAccountByWalletAddress(ctx context.Context, walletAddress string) (*Account, error)
 	GetAccountByEVMWallet(ctx context.Context, evmAddress string) (*Account, error)
 	GetAccountBySolanaWallet(ctx context.Context, solanaAddress string) (*Account, error)
@@ -38,6 +40,7 @@ type Database interface {
 	UpdateBalance(ctx context.Context, accountID uuid.UUID, newBalance usdc.MicroUSDC) error
 	SuspendAccount(ctx context.Context, accountID uuid.UUID) error
 	CloseAccount(ctx context.Context, accountID uuid.UUID) error
+	DeleteAccount(ctx context.Context, accountID uuid.UUID) error
 	AccountExists(ctx context.Context, accountNumber string) (bool, error)
 	StoreEncryptedKey(ctx context.Context, accountID uuid.UUID, encryptedKey, kmsKeyID string) error
 	GetEncryptedKey(ctx context.Context, accountID uuid.UUID) (string, error)

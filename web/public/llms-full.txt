@@ -791,56 +791,53 @@ See `.env.example` for full configuration documentation.
 ## 9. B2B / API Key Access (Business Accounts)
 
 Stronghold supports a separate B2B account model for server-to-server integration.
-B2B accounts use email/password authentication, API keys for scan requests, and
-traditional card billing via Stripe -- no crypto wallets required.
+B2B accounts use SSO authentication via WorkOS AuthKit, API keys for scan requests,
+and traditional card billing via Stripe -- no crypto wallets required.
 
 ### B2B vs B2C Account Model
 
 | | B2C (Wallet) | B2B (API Key) |
 |--|--------------|---------------|
-| **Identity** | Account number + wallet keypair | Email + password |
+| **Identity** | Account number + wallet keypair | SSO via WorkOS (email, Google, SSO, etc.) |
 | **Scan auth** | `X-PAYMENT` header (x402) | `Authorization: Bearer sk_live_...` |
 | **Payment** | Per-request x402 crypto (USDC) | Prepaid credits + metered overflow (Stripe) |
-| **Management** | CLI + OS keyring | Dashboard + JWT sessions (httpOnly cookie) |
+| **Management** | CLI + OS keyring | Dashboard + WorkOS JWT sessions |
 
 B2B and B2C accounts are completely separate. A B2B account has its own user record,
 billing relationship, and API keys. There is no conversion between account types.
 
 ### Authentication
 
-**Registration and login** use email/password and return a JWT in an httpOnly cookie:
+**Sign-in** is handled entirely by WorkOS AuthKit. Users authenticate via email/password,
+Google, or enterprise SSO on WorkOS's hosted login page. The backend validates the
+resulting JWT via JWKS and auto-provisions a local B2B account on first sign-in
+(JIT provisioning). WorkOS handles signup, login, password management, email
+verification, MFA, and social login.
+
+**Onboarding**: After first sign-in, a B2B user sets their company name:
 
 ```bash
-# Register
-curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/register \
+# Set company name (requires WorkOS JWT)
+curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/onboard \
   -H "Content-Type: application/json" \
-  -d '{"email": "dev@company.com", "password": "<your-password>", "company_name": "Acme Corp"}'
+  -H "Authorization: Bearer <workos-jwt>" \
+  -d '{"company_name": "Acme Corp"}'
 
-# Response (201 Created)
+# Response (200 OK)
 {
-  "id": "uuid",
-  "email": "dev@company.com",
-  "company_name": "Acme Corp",
-  "created_at": "2026-02-23T00:00:00Z"
+  "account_id": "uuid",
+  "company_name": "Acme Corp"
 }
-# + Set-Cookie: token=<jwt>; HttpOnly; Secure; SameSite=Strict; Path=/
-
-# Login
-curl -X POST https://api.getstronghold.xyz/v1/auth/b2b/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@company.com", "password": "<your-password>"}'
-
-# Response (200 OK) — same shape as register, plus Set-Cookie
 ```
 
 **API keys** authenticate scan requests. Create them via the JWT-authenticated
 management endpoints:
 
 ```bash
-# Create API key (requires JWT cookie)
+# Create API key (requires WorkOS JWT)
 curl -X POST https://api.getstronghold.xyz/v1/api-keys \
   -H "Content-Type: application/json" \
-  -b "token=<jwt>" \
+  -H "Authorization: Bearer <workos-jwt>" \
   -d '{"name": "production-scanner"}'
 
 # Response (201 Created)
@@ -888,7 +885,7 @@ B2B accounts can purchase prepaid credits via Stripe Checkout:
 # Create a Stripe Checkout session for credit purchase
 curl -X POST https://api.getstronghold.xyz/v1/billing/credits \
   -H "Content-Type: application/json" \
-  -b "token=<jwt>" \
+  -H "Authorization: Bearer <workos-jwt>" \
   -d '{"amount_usd": 50}'
 
 # Response (200 OK)
@@ -924,7 +921,7 @@ billing cycle.
 ```bash
 # Get billing info (balance, Stripe customer status, current usage)
 curl -s https://api.getstronghold.xyz/v1/billing/info \
-  -b "token=<jwt>"
+  -H "Authorization: Bearer <workos-jwt>"
 
 # Response (200 OK)
 {
@@ -937,7 +934,7 @@ curl -s https://api.getstronghold.xyz/v1/billing/info \
 
 # Open Stripe billing portal (manage payment methods, view invoices)
 curl -X POST https://api.getstronghold.xyz/v1/billing/portal \
-  -b "token=<jwt>"
+  -H "Authorization: Bearer <workos-jwt>"
 
 # Response (200 OK)
 {
@@ -949,14 +946,13 @@ curl -X POST https://api.getstronghold.xyz/v1/billing/portal \
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/v1/auth/b2b/register` | POST | none | Create B2B account (email, password, company_name) |
-| `/v1/auth/b2b/login` | POST | none | Login, receive JWT cookie |
-| `/v1/api-keys` | POST | JWT | Create a new API key (returns full key once) |
-| `/v1/api-keys` | GET | JWT | List API keys (prefix only, no full keys) |
-| `/v1/api-keys/:id` | DELETE | JWT | Revoke an API key |
-| `/v1/billing/credits` | POST | JWT | Create Stripe Checkout session for credit purchase |
-| `/v1/billing/info` | GET | JWT | Get billing info (balance, usage, Stripe status) |
-| `/v1/billing/portal` | POST | JWT | Create Stripe billing portal session |
+| `/v1/auth/b2b/onboard` | POST | WorkOS JWT | Set company name (first sign-in) |
+| `/v1/api-keys` | POST | WorkOS JWT | Create a new API key (returns full key once) |
+| `/v1/api-keys` | GET | WorkOS JWT | List API keys (prefix only, no full keys) |
+| `/v1/api-keys/:id` | DELETE | WorkOS JWT | Revoke an API key |
+| `/v1/billing/credits` | POST | WorkOS JWT | Create Stripe Checkout session for credit purchase |
+| `/v1/billing/info` | GET | WorkOS JWT | Get billing info (balance, usage, Stripe status) |
+| `/v1/billing/portal` | POST | WorkOS JWT | Create Stripe billing portal session |
 | `/v1/scan/content` | POST | API key | Scan content for prompt injection |
 | `/v1/scan/output` | POST | API key | Scan output for credential leaks |
 

@@ -1,5 +1,5 @@
 -- Migration: 005_b2b_accounts
--- Add B2B account support: account_type, email/password auth, Stripe customer linkage,
+-- Add B2B account support: account_type, WorkOS SSO auth, Stripe customer linkage,
 -- API keys table, and Stripe usage records table.
 
 -- ============================================================
@@ -9,10 +9,10 @@
 -- Account type discriminator
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'b2c';
 
--- B2B auth fields
+-- B2B auth / profile fields
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS company_name TEXT;
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS workos_user_id TEXT;
 
 -- Stripe billing linkage
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
@@ -65,6 +65,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email_unique
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_stripe_customer_unique
     ON accounts(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_workos_user_id_unique
+    ON accounts(workos_user_id) WHERE workos_user_id IS NOT NULL;
+
 -- Index for account_type lookups
 CREATE INDEX IF NOT EXISTS idx_accounts_account_type ON accounts(account_type);
 
@@ -104,10 +107,10 @@ CREATE INDEX IF NOT EXISTS idx_stripe_usage_account_created
 -- ============================================================
 -- Comments
 -- ============================================================
-COMMENT ON COLUMN accounts.account_type IS 'Account type: b2c (personal, account number) or b2b (business, email/password)';
+COMMENT ON COLUMN accounts.account_type IS 'Account type: b2c (personal, account number) or b2b (business, WorkOS SSO)';
 COMMENT ON COLUMN accounts.email IS 'B2B login email address';
 COMMENT ON COLUMN accounts.company_name IS 'B2B company/organization name';
-COMMENT ON COLUMN accounts.password_hash IS 'bcrypt password hash for B2B email/password auth';
+COMMENT ON COLUMN accounts.workos_user_id IS 'WorkOS user ID for B2B SSO authentication';
 COMMENT ON COLUMN accounts.stripe_customer_id IS 'Stripe Customer ID for B2B billing';
 COMMENT ON TABLE api_keys IS 'API keys for B2B server-to-server authentication';
 COMMENT ON TABLE stripe_usage_records IS 'Metered usage records sent to Stripe for B2B billing';

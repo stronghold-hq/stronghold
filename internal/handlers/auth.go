@@ -726,6 +726,11 @@ func (h *AuthHandler) generateAccessToken(accountID, accountNumber string) (stri
 // AuthMiddleware returns a middleware that validates JWT tokens
 func (h *AuthHandler) AuthMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
+		// If account_id is already set (e.g., by WorkOS B2B middleware), skip
+		if c.Locals("account_id") != nil {
+			return c.Next()
+		}
+
 		var tokenString string
 
 		// First, try to get token from httpOnly cookie

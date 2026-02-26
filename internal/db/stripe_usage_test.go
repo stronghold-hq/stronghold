@@ -19,7 +19,7 @@ func TestCreateStripeUsageRecord(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateB2BAccount(ctx, "stripe-usage@example.com", "$2a$12$hashedpassword...", "Usage Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01USAGE", "stripe-usage@example.com", "Usage Co")
 	require.NoError(t, err)
 
 	meterEventID := "evt_meter_123"
@@ -53,7 +53,7 @@ func TestGetStripeUsageRecords(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateB2BAccount(ctx, "stripe-records@example.com", "$2a$12$hashedpassword...", "Records Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01RECORDS", "stripe-records@example.com", "Records Co")
 	require.NoError(t, err)
 
 	// Create multiple records
@@ -97,7 +97,7 @@ func TestGetStripeUsageRecords_Empty(t *testing.T) {
 	db := &DB{pool: testDB.Pool}
 	ctx := context.Background()
 
-	account, err := db.CreateB2BAccount(ctx, "stripe-empty@example.com", "$2a$12$hashedpassword...", "Empty Co")
+	account, err := db.CreateB2BAccount(ctx, "user_01EMPTY", "stripe-empty@example.com", "Empty Co")
 	require.NoError(t, err)
 
 	// Retrieve records for account with no usage

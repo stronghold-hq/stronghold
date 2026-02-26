@@ -199,6 +199,14 @@ func (s *Server) setupRoutes() {
 	pricingHandler := handlers.NewPricingHandler(x402)
 	pricingHandler.RegisterRoutes(s.app)
 
+	// WorkOS B2B auth middleware — validates WorkOS JWTs and provisions B2B accounts.
+	// Applied globally AFTER health/pricing routes so those don't run through it.
+	// For non-JWT requests it's a no-op (calls Next immediately).
+	// When a valid WorkOS JWT is found, it sets account_id in context so downstream
+	// auth middleware (AuthMiddleware) can skip re-validation.
+	workosAuth := middleware.NewWorkOSAuthMiddleware(s.database, &s.config.WorkOS, &s.config.Stripe)
+	s.app.Use(workosAuth.Handler())
+
 	// Auth handlers with stricter rate limiting
 	s.authHandler.RegisterRoutesWithMiddleware(s.app, rateLimiter.AuthLimiter())
 
@@ -208,9 +216,10 @@ func (s *Server) setupRoutes() {
 		stripe.Key = s.config.Stripe.SecretKey
 	}
 
-	// B2B auth handlers (register/login) with rate limiting
-	b2bAuthHandler := handlers.NewB2BAuthHandler(s.database, s.authHandler, &s.config.Stripe)
-	b2bAuthHandler.RegisterRoutes(s.app, rateLimiter.AuthLimiter())
+	// B2B onboarding (requires authenticated account — WorkOS middleware already
+	// set account_id globally, so AuthMiddleware just verifies it's present)
+	b2bAuthHandler := handlers.NewB2BAuthHandler(s.database)
+	b2bAuthHandler.RegisterRoutes(s.app, s.authHandler.AuthMiddleware())
 
 	// Account handlers (no payment required for account management)
 	// Reuse authConfig from authHandler initialization

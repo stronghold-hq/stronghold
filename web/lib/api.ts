@@ -41,10 +41,26 @@ export async function fetchWithAuth(
   input: string,
   init?: RequestInit
 ): Promise<Response> {
-  const options: RequestInit = {
-    ...init,
-    credentials: 'include',
-  };
+  const options: RequestInit = { ...init };
+
+  if (_getB2BAccessToken) {
+    // B2B: use WorkOS Bearer token (SDK handles refresh internally)
+    try {
+      const token = await _getB2BAccessToken();
+      const headers = new Headers(options.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      options.headers = headers;
+    } catch {
+      // Token refresh failed — redirect to login
+      if (typeof window !== 'undefined') {
+        window.location.href = '/dashboard/login';
+      }
+      throw new Error('Session expired');
+    }
+  } else {
+    // B2C: use httpOnly cookies
+    options.credentials = 'include';
+  }
 
   let response: Response;
   try {
@@ -56,8 +72,8 @@ export async function fetchWithAuth(
     throw err;
   }
 
-  if (response.status === 401) {
-    // Attempt token refresh
+  // B2C-only: attempt cookie-based token refresh on 401
+  if (!_getB2BAccessToken && response.status === 401) {
     const refreshResponse = await fetchWithTimeout(`${API_URL}/v1/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
@@ -107,34 +123,29 @@ export async function fetchBalances(): Promise<BalancesResponse> {
   return response.json();
 }
 
-// --- B2B API helpers ---
+// --- B2B token provider ---
 
-export async function b2bRegister(email: string, password: string, companyName: string) {
-  const response = await fetch(`${API_URL}/v1/auth/b2b/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email, password, company_name: companyName }),
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Registration failed');
-  }
-  return response.json();
+// Module-level function that returns a fresh B2B access token (set by AuthProvider
+// when a WorkOS user is detected). fetchWithAuth calls this before every request
+// so tokens are always fresh (the WorkOS SDK handles refresh internally).
+let _getB2BAccessToken: (() => Promise<string>) | null = null;
+
+export function setB2BTokenProvider(fn: (() => Promise<string>) | null) {
+  _getB2BAccessToken = fn;
 }
 
-export async function b2bLogin(email: string, password: string) {
-  const response = await fetch(`${API_URL}/v1/auth/b2b/login`, {
+// --- B2B API helpers ---
+
+export async function onboardB2B(companyName: string): Promise<void> {
+  const response = await fetchWithAuth(`${API_URL}/v1/auth/b2b/onboard`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ company_name: companyName }),
   });
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'Login failed');
+    throw new Error(error.error || 'Onboarding failed');
   }
-  return response.json();
 }
 
 export interface APIKeyItem {

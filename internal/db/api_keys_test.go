@@ -15,7 +15,7 @@ import (
 func createTestB2BAccount(t *testing.T, db *DB, email string) *Account {
 	t.Helper()
 	ctx := context.Background()
-	account, err := db.CreateB2BAccount(ctx, email, "$2a$12$hashedpassword...", "Test Company")
+	account, err := db.CreateB2BAccount(ctx, "user_01"+email, email, "Test Company")
 	require.NoError(t, err)
 	return account
 }

@@ -475,7 +475,7 @@ func TestStripeWebhook_CheckoutSessionCompleted(t *testing.T) {
 	defer database.Close()
 
 	// Create a B2B account
-	account, err := database.CreateB2BAccount(t.Context(), "test@example.com", "$2a$12$test", "Test Corp")
+	account, err := database.CreateB2BAccount(t.Context(), "user_01TEST", "test@example.com", "Test Corp")
 	require.NoError(t, err)
 
 	// Create a pending deposit for a B2B credit purchase (no fee)
@@ -541,7 +541,7 @@ func TestStripeWebhook_CheckoutSessionNotPaid(t *testing.T) {
 	defer database.Close()
 
 	// Create a B2B account
-	account, err := database.CreateB2BAccount(t.Context(), "test@example.com", "$2a$12$test", "Test Corp")
+	account, err := database.CreateB2BAccount(t.Context(), "user_01TEST", "test@example.com", "Test Corp")
 	require.NoError(t, err)
 
 	// Create a pending deposit

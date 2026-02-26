@@ -13,21 +13,23 @@ type LoginTab = 'personal' | 'business';
 export default function LoginPage() {
   const [tab, setTab] = useState<LoginTab>('personal');
   const [accountNumber, setAccountNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
   const [ttlDays, setTtlDays] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { login, verifyTotp, resetTotp, b2bLogin, totpRequired, isAuthenticated, isLoading } = useAuth();
+  const { login, verifyTotp, resetTotp, b2bSignIn, totpRequired, isAuthenticated, isLoading, needsOnboarding } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
-      router.replace('/dashboard/main');
+      if (needsOnboarding) {
+        router.replace('/dashboard/b2b/create');
+      } else {
+        router.replace('/dashboard/main');
+      }
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, needsOnboarding, router]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatAccountNumber(e.target.value);
@@ -38,6 +40,17 @@ export default function LoginPage() {
   const handleTabChange = (newTab: LoginTab) => {
     setTab(newTab);
     setError('');
+  };
+
+  const handleB2BSignIn = async () => {
+    setError('');
+    setIsSubmitting(true);
+    try {
+      await b2bSignIn();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed');
+      setIsSubmitting(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,23 +68,6 @@ export default function LoginPage() {
         router.push('/dashboard/main');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'TOTP verification failed');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
-    if (tab === 'business') {
-      if (!email.trim() || !password.trim()) {
-        setError('Please enter your email and password');
-        return;
-      }
-      setIsSubmitting(true);
-      try {
-        await b2bLogin(email.trim(), password);
-        router.push('/dashboard/main');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Login failed');
       } finally {
         setIsSubmitting(false);
       }
@@ -111,7 +107,6 @@ export default function LoginPage() {
     );
   }
 
-  const isB2BFormValid = email.trim().length > 0 && password.trim().length > 0;
   const isB2CFormValid = accountNumber.length >= 19;
 
   return (
@@ -170,159 +165,156 @@ export default function LoginPage() {
             {totpRequired
               ? 'Enter your TOTP or recovery code to trust this device'
               : tab === 'business'
-                ? 'Sign in with your business email and password'
+                ? 'Sign in with your business account via SSO'
                 : 'Enter your account number to access your dashboard'}
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {totpRequired ? (
-              <>
+          {tab === 'business' && !totpRequired ? (
+            // B2B: Single SSO button
+            <div className="space-y-4">
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="flex items-center gap-2 text-red-400 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4" />
+                  {error}
+                </motion.div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleB2BSignIn}
+                disabled={isSubmitting}
+                className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  'Redirecting...'
+                ) : (
+                  <>
+                    Sign in with SSO
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            // B2C: Account number + TOTP form
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {totpRequired ? (
+                <>
+                  <div>
+                    <label
+                      htmlFor="totpCode"
+                      className="block text-sm font-medium text-gray-300 mb-2"
+                    >
+                      {useRecovery ? 'Recovery Code' : 'TOTP Code'}
+                    </label>
+                    <input
+                      type="text"
+                      id="totpCode"
+                      value={totpCode}
+                      onChange={(e) => setTotpCode(e.target.value)}
+                      placeholder={useRecovery ? 'XXXX-XXXX-XXXX-XXXX' : '123456'}
+                      className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors font-mono text-lg tracking-wider"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <input
+                      id="useRecovery"
+                      type="checkbox"
+                      checked={useRecovery}
+                      onChange={(e) => setUseRecovery(e.target.checked)}
+                      className="h-4 w-4 rounded border-[#333] bg-[#0a0a0a] text-[#00D4AA] focus:ring-[#00D4AA]"
+                    />
+                    <label htmlFor="useRecovery">Use recovery code</label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Trust this device for
+                    </label>
+                    <select
+                      value={ttlDays}
+                      onChange={(e) => setTtlDays(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#333] rounded-lg text-white"
+                    >
+                      <option value={0}>Indefinitely (default)</option>
+                      <option value={30}>30 days</option>
+                      <option value={90}>90 days</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGoBack}
+                    className="w-full py-2 px-4 bg-[#0a0a0a] border border-[#333] text-gray-300 rounded-lg hover:border-[#00D4AA] hover:text-white transition-colors"
+                  >
+                    Go Back
+                  </button>
+                </>
+              ) : (
                 <div>
                   <label
-                    htmlFor="totpCode"
+                    htmlFor="accountNumber"
                     className="block text-sm font-medium text-gray-300 mb-2"
                   >
-                    {useRecovery ? 'Recovery Code' : 'TOTP Code'}
+                    Account Number
                   </label>
                   <input
                     type="text"
-                    id="totpCode"
-                    value={totpCode}
-                    onChange={(e) => setTotpCode(e.target.value)}
-                    placeholder={useRecovery ? 'XXXX-XXXX-XXXX-XXXX' : '123456'}
+                    id="accountNumber"
+                    value={accountNumber}
+                    onChange={handleInputChange}
+                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                    maxLength={19}
                     className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors font-mono text-lg tracking-wider"
                   />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <input
-                    id="useRecovery"
-                    type="checkbox"
-                    checked={useRecovery}
-                    onChange={(e) => setUseRecovery(e.target.checked)}
-                    className="h-4 w-4 rounded border-[#333] bg-[#0a0a0a] text-[#00D4AA] focus:ring-[#00D4AA]"
-                  />
-                  <label htmlFor="useRecovery">Use recovery code</label>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Trust this device for
-                  </label>
-                  <select
-                    value={ttlDays}
-                    onChange={(e) => setTtlDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#333] rounded-lg text-white"
-                  >
-                    <option value={0}>Indefinitely (default)</option>
-                    <option value={30}>30 days</option>
-                    <option value={90}>90 days</option>
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGoBack}
-                  className="w-full py-2 px-4 bg-[#0a0a0a] border border-[#333] text-gray-300 rounded-lg hover:border-[#00D4AA] hover:text-white transition-colors"
-                >
-                  Go Back
-                </button>
-              </>
-            ) : tab === 'business' ? (
-              <>
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="block text-sm font-medium text-gray-300 mb-2"
-                  >
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    id="email"
-                    value={email}
-                    onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                    placeholder="you@company.com"
-                    className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="password"
-                    className="block text-sm font-medium text-gray-300 mb-2"
-                  >
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    id="password"
-                    value={password}
-                    onChange={(e) => { setPassword(e.target.value); setError(''); }}
-                    placeholder="Enter your password"
-                    className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors"
-                  />
-                </div>
-              </>
-            ) : (
-              <div>
-                <label
-                  htmlFor="accountNumber"
-                  className="block text-sm font-medium text-gray-300 mb-2"
-                >
-                  Account Number
-                </label>
-                <input
-                  type="text"
-                  id="accountNumber"
-                  value={accountNumber}
-                  onChange={handleInputChange}
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
-                  maxLength={19}
-                  className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#333] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-colors font-mono text-lg tracking-wider"
-                />
-              </div>
-            )}
-
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="flex items-center gap-2 text-red-400 text-sm"
-              >
-                <AlertCircle className="w-4 h-4" />
-                {error}
-              </motion.div>
-            )}
-
-            <button
-              type="submit"
-              disabled={
-                isSubmitting ||
-                (totpRequired && totpCode.trim().length === 0) ||
-                (!totpRequired && tab === 'personal' && !isB2CFormValid) ||
-                (!totpRequired && tab === 'business' && !isB2BFormValid)
-              }
-              className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              {isSubmitting ? (
-                totpRequired ? 'Verifying...' : 'Logging in...'
-              ) : (
-                <>
-                  {totpRequired ? 'Verify' : 'Login'}
-                  <ArrowRight className="w-4 h-4" />
-                </>
               )}
-            </button>
-          </form>
+
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="flex items-center gap-2 text-red-400 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4" />
+                  {error}
+                </motion.div>
+              )}
+
+              <button
+                type="submit"
+                disabled={
+                  isSubmitting ||
+                  (totpRequired && totpCode.trim().length === 0) ||
+                  (!totpRequired && !isB2CFormValid)
+                }
+                className="w-full py-3 px-4 bg-[#00D4AA] hover:bg-[#00b894] disabled:bg-[#004d3d] disabled:cursor-not-allowed text-black font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  totpRequired ? 'Verifying...' : 'Logging in...'
+                ) : (
+                  <>
+                    {totpRequired ? 'Verify' : 'Login'}
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
 
           {!totpRequired && (
             <div className="mt-6 pt-6 border-t border-[#222] text-center">
               {tab === 'business' ? (
                 <p className="text-gray-400 text-sm">
-                  Need a business account?{' '}
-                  <a
-                    href="/dashboard/b2b/create"
+                  New to Stronghold?{' '}
+                  <button
+                    onClick={handleB2BSignIn}
                     className="text-[#00D4AA] hover:underline"
                   >
-                    Sign up here
-                  </a>
+                    Create a business account
+                  </button>
                 </p>
               ) : (
                 <p className="text-gray-400 text-sm">
@@ -344,7 +336,7 @@ export default function LoginPage() {
           {totpRequired
             ? 'This device is not trusted yet. Enter your TOTP to continue.'
             : tab === 'business'
-              ? 'Business accounts use email and password authentication.'
+              ? 'Business accounts use single sign-on via WorkOS.'
               : 'Your account number is your password. Store it securely.'}
         </p>
       </motion.div>
