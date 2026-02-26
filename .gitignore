@@ -55,6 +55,9 @@ tmp/
 temp/
 *.tmp
 
+# Wrangler (Cloudflare)
+.wrangler/
+
 # Next.js build output
 web/.next/
 web/out/
