@@ -131,7 +131,7 @@ sudo mv stronghold stronghold-proxy /usr/local/bin/
 | stronghold init --yes --skip-service | Skip proxy/service install (account setup only) | No |
 | stronghold enable          | Start proxy, enable traffic interception              | Yes  |
 | stronghold disable         | Stop proxy, restore direct access                     | Yes  |
-| stronghold status          | Show proxy status and statistics                      | No   |
+| stronghold status          | Show proxy status, balances (Base/Solana), and stats  | No   |
 | stronghold health          | Check API and Base/Solana RPC health                  | No   |
 | stronghold logs            | View proxy logs                                       | No   |
 | stronghold account balance | Check balance (Base and Solana wallets)               | No   |
@@ -243,7 +243,6 @@ Control how the proxy handles scan results for content (incoming):
 ```yaml
 # ~/.stronghold/config.yaml
 scanning:
-  mode: smart
   block_threshold: 0.55
   fail_open: true
 

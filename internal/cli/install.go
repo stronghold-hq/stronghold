@@ -329,7 +329,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
 			resp, err := apiClient.CreateAccount(&CreateAccountRequest{WalletAddress: &address})
 			if err != nil {
-				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ API unavailable: %v", err)))
+				m.progress = append(m.progress, warningStyle.Render("⚠ "+friendlyAPIError("API unavailable", err)))
 				m.accountNumber = generateSimulatedAccountNumber()
 			} else {
 				m.accountNumber = resp.AccountNumber
@@ -357,7 +357,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			apiClient := NewAPIClient(m.config.API.Endpoint, m.config.Auth.DeviceToken)
 			loginResp, err := apiClient.Login(accountNum)
 			if err != nil {
-				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ Login failed: %v", err)))
+				m.progress = append(m.progress, errorStyle.Render("✗ "+friendlyLoginError(err)))
 				m.loginInput.SetValue("") // Clear invalid account number
 				m.awaitingLoginInput = false
 				return m, nil
@@ -369,7 +369,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.progress = append(m.progress, successStyle.Render(fmt.Sprintf("✓ Logged in as %s", loginResp.AccountNumber)))
 
 			if err := ensureTrustedDevice(apiClient, m.config, loginResp.TOTPRequired); err != nil {
-				m.progress = append(m.progress, errorStyle.Render(fmt.Sprintf("✗ TOTP verification failed: %v", err)))
+				m.progress = append(m.progress, errorStyle.Render("✗ "+friendlyAPIError("TOTP verification failed", err)))
 				m.awaitingLoginInput = false
 				return m, nil
 			}
@@ -384,7 +384,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 				if loginResp.EscrowEnabled {
 					privateKey, err := apiClient.GetWalletKey()
 					if err != nil {
-						m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ Wallet key fetch failed: %v", err)))
+						m.progress = append(m.progress, warningStyle.Render("⚠ "+friendlyAPIError("Wallet key fetch failed", err)))
 						m.config.Wallet.Address = *evmAddr
 						m.config.Wallet.Network = DefaultBlockchain
 						m.walletAddress = *evmAddr
@@ -470,7 +470,7 @@ func (m *InstallModel) handleEnter() (tea.Model, tea.Cmd) {
 			resp, err := apiClient.CreateAccount(req)
 			if err != nil {
 				// API failed, fall back to local wallet creation
-				m.progress = append(m.progress, warningStyle.Render(fmt.Sprintf("⚠ API unavailable: %v", err)))
+				m.progress = append(m.progress, warningStyle.Render("⚠ "+friendlyAPIError("API unavailable", err)))
 
 				// Generate simulated account number for offline mode
 				m.accountNumber = generateSimulatedAccountNumber()
@@ -1146,7 +1146,7 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string, s
 		fmt.Println("→ Logging into existing account...")
 		loginResp, err := apiClient.Login(accountNumber)
 		if err != nil {
-			return fmt.Errorf("failed to login: %w", err)
+			return fmt.Errorf("%s", friendlyLoginError(err))
 		}
 		if loginResp.TOTPRequired {
 			return fmt.Errorf("TOTP required for new device login. Run interactively to complete verification")
@@ -1166,7 +1166,7 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string, s
 					// Fallback: use wallet address without key
 					config.Wallet.Address = *evmAddr
 					config.Wallet.Network = DefaultBlockchain
-					fmt.Printf("⚠ Wallet key fetch failed: %v\n", err)
+					fmt.Printf("⚠ %s\n", friendlyAPIError("Wallet key fetch failed", err))
 				} else {
 					address, err := ImportWallet(userID, DefaultBlockchain, walletKey)
 					// Zero the private key after use
@@ -1248,7 +1248,7 @@ func RunInitNonInteractive(privateKey, solanaPrivateKey, accountNumber string, s
 
 		resp, err := apiClient.CreateAccount(req)
 		if err != nil {
-			fmt.Printf("⚠ API unavailable: %v\n", err)
+			fmt.Printf("⚠ %s\n", friendlyAPIError("API unavailable", err))
 			config.Auth.AccountNumber = generateSimulatedAccountNumber()
 		} else {
 			config.Auth.AccountNumber = resp.AccountNumber

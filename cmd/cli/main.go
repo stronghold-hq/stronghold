@@ -189,7 +189,6 @@ Available scanning keys:
   scanning.output.enabled           - Reserved for future output policy (not currently enforced)
   scanning.output.action_on_warn    - Reserved output WARN action (not currently enforced)
   scanning.output.action_on_block   - Reserved output BLOCK action (not currently enforced)
-  scanning.mode                     - Scanning mode (smart/strict/permissive)
   scanning.block_threshold          - Score threshold for BLOCK (0.0-1.0)
   scanning.fail_open                - Pass traffic if scan fails (true/false)`,
 	}

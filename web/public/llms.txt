@@ -71,7 +71,7 @@ stronghold health
 | stronghold init --yes --skip-service | Skip proxy/service install (account setup only) |
 | stronghold enable          | Start proxy, enable interception                      |
 | stronghold disable         | Stop proxy, restore direct access                     |
-| stronghold status          | Show proxy status and statistics                      |
+| stronghold status          | Show proxy status, balances (Base/Solana), and stats  |
 | stronghold health          | Check API and Base/Solana RPC health                  |
 | stronghold account balance | Check balance (Base and Solana wallets)               |
 | stronghold account deposit | Show deposit addresses (Base and Solana)              |

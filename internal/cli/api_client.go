@@ -4,10 +4,13 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"strings"
 	"time"
 )
 
@@ -270,4 +273,67 @@ func (c *APIClient) RegisterWalletAddresses(evmAddr, solanaAddr string) error {
 	}
 	_, err := c.UpdateWalletAddresses(req)
 	return err
+}
+
+// isNetworkError returns true if the error is a network-level failure
+// (DNS resolution, connection refused, timeout, etc.).
+func isNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "network is unreachable")
+}
+
+// friendlyLoginError maps login errors to user-friendly messages.
+func friendlyLoginError(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 401:
+			return "Invalid account number. Check your number and try again."
+		case 404:
+			return "Account not found. Verify your account number or create a new account."
+		case 429:
+			return "Too many login attempts. Please wait a moment and try again."
+		case 500, 502, 503:
+			return "Stronghold API is temporarily unavailable. Try again shortly."
+		}
+	}
+	if isNetworkError(err) {
+		return "Cannot reach Stronghold API. Check your internet connection."
+	}
+	return fmt.Sprintf("Login failed: %v", err)
+}
+
+// friendlyAPIError maps generic API errors to user-friendly messages.
+func friendlyAPIError(action string, err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch {
+		case apiErr.StatusCode == 429:
+			return "Too many requests. Please wait a moment and try again."
+		case apiErr.StatusCode >= 500:
+			return "Stronghold API is temporarily unavailable. Try again shortly."
+		}
+	}
+	if isNetworkError(err) {
+		return "Cannot reach Stronghold API. Check your internet connection."
+	}
+	return fmt.Sprintf("%s: %v", action, err)
 }

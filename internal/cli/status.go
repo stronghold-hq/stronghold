@@ -69,22 +69,66 @@ func Status() error {
 	fmt.Println("Session:")
 	if config.Auth.LoggedIn {
 		fmt.Printf("  User:       %s\n", config.Auth.Email)
-		// Fetch real balance from wallet
-		if config.Wallet.Address != "" && config.Auth.UserID != "" {
-			w, err := wallet.New(wallet.Config{
-				UserID:  config.Auth.UserID,
-				Network: config.Wallet.Network,
-			})
-			if err != nil {
-				fmt.Printf("  Balance:    Error — %v\n", err)
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				balance, err := w.GetBalanceHuman(ctx)
+		// Fetch real balances from both wallets
+		if config.Auth.UserID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			var evmBalance, solanaBalance float64
+			var evmErr, solanaErr error
+			var hasEVM, hasSolana bool
+
+			// Fetch EVM (Base) balance
+			if config.Wallet.Address != "" {
+				hasEVM = true
+				w, err := wallet.New(wallet.Config{
+					UserID:  config.Auth.UserID,
+					Network: config.Wallet.Network,
+				})
 				if err != nil {
-					fmt.Printf("  Balance:    Error — %v\n", err)
+					evmErr = err
 				} else {
-					fmt.Printf("  Balance:    $%.2f\n", balance)
+					evmBalance, evmErr = w.GetBalanceHuman(ctx)
+				}
+			}
+
+			// Fetch Solana balance
+			if config.Wallet.SolanaAddress != "" {
+				hasSolana = true
+				solanaNetwork := config.Wallet.SolanaNetwork
+				if solanaNetwork == "" {
+					solanaNetwork = DefaultSolanaNetwork
+				}
+				sw, err := wallet.NewSolana(wallet.SolanaConfig{
+					UserID:  config.Auth.UserID,
+					Network: solanaNetwork,
+				})
+				if err != nil {
+					solanaErr = err
+				} else {
+					solanaBalance, solanaErr = sw.GetBalanceHuman(ctx)
+				}
+			}
+
+			// Display balances: only show a chain if balance > 0
+			switch {
+			case !hasEVM && !hasSolana:
+				fmt.Printf("  Balance:    Error — wallet not configured\n")
+			case evmErr != nil && solanaErr != nil:
+				fmt.Printf("  Balance:    Error — %v\n", evmErr)
+			default:
+				evmPositive := hasEVM && evmErr == nil && evmBalance > 0
+				solanaPositive := hasSolana && solanaErr == nil && solanaBalance > 0
+
+				if evmPositive && solanaPositive {
+					fmt.Printf("  Balance:    $%.2f (Base)\n", evmBalance)
+					fmt.Printf("              $%.2f (Solana)\n", solanaBalance)
+				} else if evmPositive {
+					fmt.Printf("  Balance:    $%.2f (Base)\n", evmBalance)
+				} else if solanaPositive {
+					fmt.Printf("  Balance:    $%.2f (Solana)\n", solanaBalance)
+				} else {
+					fmt.Printf("  Balance:    $0.00\n")
 				}
 			}
 		} else {
@@ -112,7 +156,6 @@ func Status() error {
 	fmt.Printf("  Config:     %s\n", ConfigPath())
 	fmt.Printf("  Logs:       %s\n", config.Logging.File)
 	fmt.Printf("  API:        %s\n", config.API.Endpoint)
-	fmt.Printf("  Mode:       %s\n", config.Scanning.Mode)
 	fmt.Println()
 
 	// Quick actions
